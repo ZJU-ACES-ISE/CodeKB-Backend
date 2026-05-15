@@ -1,5 +1,6 @@
 package com.codekb.analysis;
 
+import com.codekb.config.GithubApiProperties;
 import com.codekb.event.GraphJobRequestedEvent;
 import com.codekb.event.RepoImportedEvent;
 import com.codekb.repo.KbRepo;
@@ -9,9 +10,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.client.RestClient;
 
 import java.util.*;
@@ -26,22 +28,29 @@ public class AnalysisService {
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
+    private final GithubApiProperties githubApiProperties;
 
     public AnalysisService(KbRepoService repoService,
                            RepoSummaryRepository summaryRepo,
                            ApplicationEventPublisher eventPublisher,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper,
+                           GithubApiProperties githubApiProperties) {
         this.repoService = repoService;
         this.summaryRepo = summaryRepo;
         this.eventPublisher = eventPublisher;
         this.objectMapper = objectMapper;
-        this.restClient = RestClient.builder()
+        this.githubApiProperties = githubApiProperties;
+        RestClient.Builder builder = RestClient.builder()
                 .defaultHeader(HttpHeaders.USER_AGENT, "CodeKB-Demo/0.1")
-                .defaultHeader(HttpHeaders.ACCEPT, "application/vnd.github+json")
-                .build();
+                .defaultHeader(HttpHeaders.ACCEPT, "application/vnd.github+json");
+        String token = githubApiProperties.getToken();
+        if (token != null && !token.isBlank()) {
+            builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim());
+        }
+        this.restClient = builder.build();
     }
 
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void handleRepoImported(RepoImportedEvent event) {
         Long repoId = event.getRepoId();
         log.info("Analysis triggered for repoId={}", repoId);

@@ -53,6 +53,8 @@ codekb:
     poll-interval-ms: 1500
     max-poll-times: 200
     request-timeout-ms: 10000
+  github:
+    token: ${CODEKB_GITHUB_TOKEN:}
 
 springdoc:
   api-docs:
