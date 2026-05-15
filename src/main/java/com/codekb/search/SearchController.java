@@ -11,6 +11,7 @@ import com.codekb.knowledge.KnowledgeBase;
 import com.codekb.knowledge.KnowledgeBaseRepository;
 import com.codekb.repo.KbRepo;
 import com.codekb.repo.KbRepoRepository;
+import com.codekb.repo.RepoUrlParser;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -63,6 +64,7 @@ public class SearchController {
             item.put("repoId", repo.getId());
             item.put("repoName", repo.getName());
             item.put("githubUrl", repo.getGithubUrl());
+            item.put("provider", providerOf(repo));
             item.put("language", repo.getLanguage());
             item.put("starCount", repo.getStarCount());
             item.put("score", score);
@@ -106,6 +108,8 @@ public class SearchController {
         // 状态分布
         Map<String, Long> statusDist = repos.stream()
                 .collect(Collectors.groupingBy(KbRepo::getStatus, Collectors.counting()));
+        Map<String, Long> providerDist = repos.stream()
+                .collect(Collectors.groupingBy(this::providerOf, Collectors.counting()));
 
         // Star 排行（前 10）
         List<Map<String, Object>> topStars = repos.stream()
@@ -117,6 +121,7 @@ public class SearchController {
                     m.put("repoId", r.getId());
                     m.put("name", r.getName());
                     m.put("githubUrl", r.getGithubUrl());
+                    m.put("provider", providerOf(r));
                     m.put("language", r.getLanguage());
                     m.put("starCount", r.getStarCount());
                     return m;
@@ -159,6 +164,7 @@ public class SearchController {
         result.put("totalNodes", totalNodes);
         result.put("totalEdges", totalEdges);
         result.put("languageDistribution", sortedByValue(langDist));
+        result.put("providerDistribution", sortedByValue(providerDist));
         result.put("statusDistribution", statusDist);
         result.put("topicDistribution", sortedByValue(topicDist));
         result.put("topStarRepos", topStars);
@@ -218,6 +224,10 @@ public class SearchController {
                 "// 当前为 demo 模拟展示");
         snippets.add(s1);
         return snippets;
+    }
+
+    private String providerOf(KbRepo repo) {
+        return RepoUrlParser.parse(repo.getGithubUrl(), repo.getProvider()).provider().key();
     }
 
     private String langExt(String lang) {

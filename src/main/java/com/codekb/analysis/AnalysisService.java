@@ -4,6 +4,9 @@ import com.codekb.config.GithubApiProperties;
 import com.codekb.event.GraphJobRequestedEvent;
 import com.codekb.event.RepoImportedEvent;
 import com.codekb.repo.KbRepo;
+import com.codekb.repo.RepoProvider;
+import com.codekb.repo.RepoUrlParser;
+import com.codekb.repo.RepoUrlParts;
 import com.codekb.repo.KbRepoService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,6 +19,8 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.client.RestClient;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @Service
@@ -27,8 +32,8 @@ public class AnalysisService {
     private final RepoSummaryRepository summaryRepo;
     private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
-    private final RestClient restClient;
-    private final GithubApiProperties githubApiProperties;
+    private final RestClient githubClient;
+    private final RestClient defaultClient;
 
     public AnalysisService(KbRepoService repoService,
                            RepoSummaryRepository summaryRepo,
@@ -39,7 +44,10 @@ public class AnalysisService {
         this.summaryRepo = summaryRepo;
         this.eventPublisher = eventPublisher;
         this.objectMapper = objectMapper;
-        this.githubApiProperties = githubApiProperties;
+        this.defaultClient = RestClient.builder()
+                .defaultHeader(HttpHeaders.USER_AGENT, "CodeKB-Demo/0.1")
+                .defaultHeader(HttpHeaders.ACCEPT, "application/json")
+                .build();
         RestClient.Builder builder = RestClient.builder()
                 .defaultHeader(HttpHeaders.USER_AGENT, "CodeKB-Demo/0.1")
                 .defaultHeader(HttpHeaders.ACCEPT, "application/vnd.github+json");
@@ -47,7 +55,7 @@ public class AnalysisService {
         if (token != null && !token.isBlank()) {
             builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim());
         }
-        this.restClient = builder.build();
+        this.githubClient = builder.build();
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
@@ -67,58 +75,179 @@ public class AnalysisService {
             Map<String, Integer> languageBytes = new LinkedHashMap<>();
             List<Map<String, Object>> contributors = new ArrayList<>();
 
-            if (repo.getOwner() != null && repo.getRepo() != null) {
-                String base = "https://api.github.com/repos/" + repo.getOwner() + "/" + repo.getRepo();
+            RepoUrlParts parts = RepoUrlParser.parse(repo.getGithubUrl(), repo.getProvider());
+            if (parts.hasRemoteProject()) {
+                RepoProvider provider = parts.provider();
+                switch (provider) {
+                    case GITEE -> {
+                        String base = "https://gitee.com/api/v5/repos/" + parts.owner() + "/" + parts.repo();
+                        try {
+                            String body = defaultClient.get().uri(base).retrieve().body(String.class);
+                            JsonNode node = objectMapper.readTree(body);
+                            language = textOr(node, "language", language);
+                            description = node.path("description").asText("");
+                            starCount = node.path("stargazers_count").asInt(0);
+                            forkCount = node.path("forks_count").asInt(0);
+                            watchers = node.path("watchers_count").asInt(0);
+                            openIssues = node.path("open_issues_count").asInt(0);
+                            defaultBranch = nullableText(node, "default_branch");
+                            homepage = nullableText(node, "homepage");
+                            JsonNode licNode = node.path("license");
+                            if (licNode != null && !licNode.isMissingNode() && !licNode.isNull()) {
+                                license = nullableText(licNode, "spdx_id");
+                            }
+                        } catch (Exception e) {
+                            log.warn("Gitee repo info failed for {}/{}: {}", parts.owner(), parts.repo(), e.getMessage());
+                        }
 
-                // 1) main repo info
-                try {
-                    String body = restClient.get().uri(base).retrieve().body(String.class);
-                    JsonNode node = objectMapper.readTree(body);
-                    if (!node.path("language").isNull()) language = node.path("language").asText("Unknown");
-                    description = node.path("description").asText("");
-                    starCount = node.path("stargazers_count").asInt(0);
-                    forkCount = node.path("forks_count").asInt(0);
-                    watchers = node.path("watchers_count").asInt(0);
-                    openIssues = node.path("open_issues_count").asInt(0);
-                    sizeKb = node.path("size").asInt(0);
-                    defaultBranch = nullableText(node, "default_branch");
-                    homepage = nullableText(node, "homepage");
-                    JsonNode licNode = node.path("license");
-                    if (licNode != null && !licNode.isMissingNode() && !licNode.isNull()) {
-                        license = nullableText(licNode, "spdx_id");
-                    }
-                    JsonNode topicsNode = node.path("topics");
-                    if (topicsNode.isArray()) topicsNode.forEach(t -> topics.add(t.asText()));
-                } catch (Exception e) {
-                    log.warn("GitHub repo info failed for {}/{}: {}", repo.getOwner(), repo.getRepo(), e.getMessage());
-                }
+                        try {
+                            String body = defaultClient.get().uri(base + "/languages").retrieve().body(String.class);
+                            JsonNode node = objectMapper.readTree(body).path("languages");
+                            if (node.isArray()) {
+                                for (JsonNode item : node) {
+                                    String langName = item.path("language").asText("");
+                                    int bytes = item.path("bytes").asInt(0);
+                                    if (!langName.isBlank() && bytes > 0) {
+                                        languageBytes.put(langName, bytes);
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("Gitee languages failed: {}", e.getMessage());
+                        }
 
-                // 2) languages distribution
-                try {
-                    String body = restClient.get().uri(base + "/languages").retrieve().body(String.class);
-                    JsonNode node = objectMapper.readTree(body);
-                    node.fieldNames().forEachRemaining(f -> languageBytes.put(f, node.path(f).asInt(0)));
-                } catch (Exception e) {
-                    log.warn("GitHub languages failed: {}", e.getMessage());
-                }
-
-                // 3) top contributors
-                try {
-                    String body = restClient.get().uri(base + "/contributors?per_page=10").retrieve().body(String.class);
-                    JsonNode arr = objectMapper.readTree(body);
-                    if (arr.isArray()) {
-                        for (JsonNode c : arr) {
-                            Map<String, Object> m = new LinkedHashMap<>();
-                            m.put("login", c.path("login").asText(""));
-                            m.put("avatar_url", c.path("avatar_url").asText(""));
-                            m.put("html_url", c.path("html_url").asText(""));
-                            m.put("contributions", c.path("contributions").asInt(0));
-                            contributors.add(m);
+                        try {
+                            String body = defaultClient.get().uri(base + "/contributors?per_page=10").retrieve().body(String.class);
+                            JsonNode arr = objectMapper.readTree(body);
+                            if (arr.isArray()) {
+                                for (JsonNode c : arr) {
+                                    Map<String, Object> m = new LinkedHashMap<>();
+                                    String login = c.path("login").asText("");
+                                    String name = c.path("name").asText("");
+                                    m.put("login", !login.isBlank() ? login : name);
+                                    m.put("avatar_url", c.path("avatar_url").asText(""));
+                                    m.put("html_url", c.path("html_url").asText(""));
+                                    m.put("contributions", c.path("contributions").asInt(0));
+                                    contributors.add(m);
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("Gitee contributors failed: {}", e.getMessage());
                         }
                     }
-                } catch (Exception e) {
-                    log.warn("GitHub contributors failed: {}", e.getMessage());
+                    case GITLAB -> {
+                        String projectPath = parts.owner() + "/" + parts.repo();
+                        String encodedProject = encodeProjectPath(projectPath);
+                        String gitlabHost = parts.host() != null && !parts.host().isBlank() ? parts.host() : "gitlab.com";
+                        String base = "https://" + gitlabHost + "/api/v4/projects/" + encodedProject;
+                        try {
+                            String body = defaultClient.get().uri(base + "?statistics=true").retrieve().body(String.class);
+                            JsonNode node = objectMapper.readTree(body);
+                            description = node.path("description").asText("");
+                            starCount = node.path("star_count").asInt(0);
+                            forkCount = node.path("forks_count").asInt(0);
+                            watchers = starCount;
+                            openIssues = node.path("open_issues_count").asInt(0);
+                            defaultBranch = nullableText(node, "default_branch");
+                            homepage = nullableText(node, "web_url");
+                            JsonNode topicsNode = node.path("topics");
+                            if (topicsNode.isArray()) topicsNode.forEach(t -> topics.add(t.asText()));
+                            JsonNode statsNode = node.path("statistics");
+                            if (statsNode != null && !statsNode.isMissingNode() && !statsNode.isNull()) {
+                                sizeKb = Math.toIntExact(statsNode.path("repository_size").asLong(0L) / 1024L);
+                            }
+                        } catch (Exception e) {
+                            log.warn("GitLab repo info failed for {}: {}", projectPath, e.getMessage());
+                        }
+
+                        try {
+                            String body = defaultClient.get().uri(base + "/languages").retrieve().body(String.class);
+                            JsonNode node = objectMapper.readTree(body);
+                            node.fieldNames().forEachRemaining(f -> {
+                                double percent = node.path(f).asDouble(0);
+                                if (percent > 0) {
+                                    languageBytes.put(f, (int) Math.round(percent * 10_000));
+                                }
+                            });
+                        } catch (Exception e) {
+                            log.warn("GitLab languages failed: {}", e.getMessage());
+                        }
+
+                        try {
+                            String body = defaultClient.get().uri(base + "/repository/contributors?per_page=10").retrieve().body(String.class);
+                            JsonNode arr = objectMapper.readTree(body);
+                            if (arr.isArray()) {
+                                for (JsonNode c : arr) {
+                                    Map<String, Object> m = new LinkedHashMap<>();
+                                    String name = c.path("name").asText("");
+                                    String email = c.path("email").asText("");
+                                    m.put("login", !name.isBlank() ? name : email);
+                                    m.put("avatar_url", "");
+                                    m.put("html_url", "");
+                                    m.put("contributions", c.path("commits").asInt(0));
+                                    contributors.add(m);
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("GitLab contributors failed: {}", e.getMessage());
+                        }
+                    }
+                    case GITHUB -> {
+                        String base = "https://api.github.com/repos/" + parts.owner() + "/" + parts.repo();
+
+                        try {
+                            String body = githubClient.get().uri(base).retrieve().body(String.class);
+                            JsonNode node = objectMapper.readTree(body);
+                            if (!node.path("language").isNull()) language = node.path("language").asText("Unknown");
+                            description = node.path("description").asText("");
+                            starCount = node.path("stargazers_count").asInt(0);
+                            forkCount = node.path("forks_count").asInt(0);
+                            watchers = node.path("watchers_count").asInt(0);
+                            openIssues = node.path("open_issues_count").asInt(0);
+                            sizeKb = node.path("size").asInt(0);
+                            defaultBranch = nullableText(node, "default_branch");
+                            homepage = nullableText(node, "homepage");
+                            JsonNode licNode = node.path("license");
+                            if (licNode != null && !licNode.isMissingNode() && !licNode.isNull()) {
+                                license = nullableText(licNode, "spdx_id");
+                            }
+                            JsonNode topicsNode = node.path("topics");
+                            if (topicsNode.isArray()) topicsNode.forEach(t -> topics.add(t.asText()));
+                        } catch (Exception e) {
+                            log.warn("GitHub repo info failed for {}/{}: {}", parts.owner(), parts.repo(), e.getMessage());
+                        }
+
+                        try {
+                            String body = githubClient.get().uri(base + "/languages").retrieve().body(String.class);
+                            JsonNode node = objectMapper.readTree(body);
+                            node.fieldNames().forEachRemaining(f -> languageBytes.put(f, node.path(f).asInt(0)));
+                        } catch (Exception e) {
+                            log.warn("GitHub languages failed: {}", e.getMessage());
+                        }
+
+                        try {
+                            String body = githubClient.get().uri(base + "/contributors?per_page=10").retrieve().body(String.class);
+                            JsonNode arr = objectMapper.readTree(body);
+                            if (arr.isArray()) {
+                                for (JsonNode c : arr) {
+                                    Map<String, Object> m = new LinkedHashMap<>();
+                                    m.put("login", c.path("login").asText(""));
+                                    m.put("avatar_url", c.path("avatar_url").asText(""));
+                                    m.put("html_url", c.path("html_url").asText(""));
+                                    m.put("contributions", c.path("contributions").asInt(0));
+                                    contributors.add(m);
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("GitHub contributors failed: {}", e.getMessage());
+                        }
+                    }
+                    case LOCAL, ZIP, OTHER -> { }
                 }
+            }
+
+            if (!languageBytes.isEmpty()) {
+                language = primaryLanguageOf(languageBytes, language);
             }
 
             List<String> frameworks = FrameworkInference.labelsFromTopics(topics);
@@ -217,6 +346,24 @@ public class AnalysisService {
     private String formatSize(int kb) {
         if (kb >= 1024) return String.format("%.1f MB", kb / 1024.0);
         return kb + " KB";
+    }
+
+    private String textOr(JsonNode node, String field, String fallback) {
+        JsonNode value = node.path(field);
+        if (value.isMissingNode() || value.isNull()) return fallback;
+        String text = value.asText("");
+        return text.isBlank() ? fallback : text;
+    }
+
+    private String primaryLanguageOf(Map<String, Integer> languageBytes, String fallback) {
+        return languageBytes.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse(fallback);
+    }
+
+    private String encodeProjectPath(String projectPath) {
+        return URLEncoder.encode(projectPath, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     private String nullableText(JsonNode node, String field) {

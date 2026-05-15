@@ -23,6 +23,9 @@ public class KbRepo {
     @Column(length = 100)
     private String repo;
 
+    @Column(length = 30)
+    private String provider;
+
     @Column(name = "github_url", nullable = false, length = 500)
     private String githubUrl;
 
@@ -68,6 +71,8 @@ public class KbRepo {
     public void setOwner(String owner) { this.owner = owner; }
     public String getRepo() { return repo; }
     public void setRepo(String repo) { this.repo = repo; }
+    public String getProvider() { return provider; }
+    public void setProvider(String provider) { this.provider = provider; }
     public String getGithubUrl() { return githubUrl; }
     public void setGithubUrl(String githubUrl) { this.githubUrl = githubUrl; }
     public String getRef() { return ref; }

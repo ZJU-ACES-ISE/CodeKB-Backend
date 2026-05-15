@@ -17,16 +17,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Service
 public class KbRepoService {
 
     private static final Logger log = LoggerFactory.getLogger(KbRepoService.class);
-
-    private static final Pattern GITHUB_PATTERN =
-            Pattern.compile("github\\.com[/:]([^/]+)/([^/.]+?)(?:\\.git)?$");
 
     private final KbRepoRepository repoRepo;
     private final KnowledgeBaseService kbService;
@@ -53,7 +48,7 @@ public class KbRepoService {
     }
 
     @Transactional
-    public KbRepo importRepo(Long kbId, String githubUrl, String ref, Integer depth, Long userId) {
+    public KbRepo importRepo(Long kbId, String githubUrl, String providerHint, String ref, Integer depth, Long userId) {
         kbService.getById(kbId); // 404 guard
 
         KbRepo entity = new KbRepo();
@@ -61,15 +56,11 @@ public class KbRepoService {
         entity.setGithubUrl(githubUrl);
         entity.setRef(ref);
         entity.setCreatedBy(userId);
-
-        Matcher m = GITHUB_PATTERN.matcher(githubUrl);
-        if (m.find()) {
-            entity.setOwner(m.group(1));
-            entity.setRepo(m.group(2));
-            entity.setName(m.group(2));
-        } else {
-            entity.setName(githubUrl);
-        }
+        RepoUrlParts parts = RepoUrlParser.parse(githubUrl, providerHint);
+        entity.setProvider(parts.provider().key());
+        entity.setOwner(parts.owner());
+        entity.setRepo(parts.repo());
+        entity.setName(parts.name());
 
         KbRepo saved = repoRepo.save(entity);
         kbService.incrementRepoCount(kbId);
@@ -104,6 +95,7 @@ public class KbRepoService {
         KbRepo entity = new KbRepo();
         entity.setKbId(kbId);
         entity.setGithubUrl("upload://" + displayName);
+        entity.setProvider(RepoProvider.ZIP.key());
         entity.setRef("");
         entity.setCreatedBy(userId);
         entity.setName(displayName);
