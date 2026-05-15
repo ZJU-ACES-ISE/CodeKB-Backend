@@ -44,8 +44,13 @@ public class GraphService {
         task.setDepth(depth != null ? depth : 1);
         task.setStatus(GraphTaskStatus.PENDING);
         RepoGraphTask saved = taskRepo.save(task);
-        eventPublisher.publishEvent(new GraphJobRequestedEvent(this, repoId));
+        eventPublisher.publishEvent(new GraphJobRequestedEvent(this, repoId, saved.getId()));
         return saved;
+    }
+
+    public RepoGraphTask getLatestTask(Long repoId) {
+        return taskRepo.findFirstByRepoIdOrderByCreatedAtDesc(repoId)
+                .orElseThrow(() -> new BusinessException(404, "该仓库暂无图任务"));
     }
 
     public RepoGraphTask getTask(Long taskId) {

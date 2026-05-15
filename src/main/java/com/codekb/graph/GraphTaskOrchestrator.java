@@ -49,23 +49,38 @@ public class GraphTaskOrchestrator {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void handle(GraphJobRequestedEvent event) {
         Long repoId = event.getRepoId();
+        Long taskId = event.getTaskId();
         log.info("Graph job requested for repoId={}", repoId);
 
-        RepoGraphTask task = new RepoGraphTask();
+        RepoGraphTask task = null;
         try {
             var repo = repoService.getById(repoId);
             if (repo.getGithubUrl() != null && repo.getGithubUrl().startsWith("upload://")) {
                 log.info("Skip git graph job for ZIP upload repoId={}", repoId);
                 return;
             }
-            task.setRepoId(repoId);
+            if (taskId != null) {
+                task = taskRepo.findById(taskId)
+                        .orElseThrow(() -> new IllegalStateException("图任务不存在: " + taskId));
+            } else {
+                task = new RepoGraphTask();
+                task.setRepoId(repoId);
+                task.setGithubUrl(repo.getGithubUrl());
+                task.setRef(repo.getRef());
+                task.setDepth(1);
+                task.setStatus(GraphTaskStatus.PENDING);
+                task = save(task);
+            }
+
+            String ref = task.getRef() != null ? task.getRef() : repo.getRef();
+            int depth = task.getDepth() < 0 ? 1 : task.getDepth();
             task.setGithubUrl(repo.getGithubUrl());
-            task.setRef(repo.getRef());
-            task.setDepth(1);
+            task.setRef(ref);
+            task.setDepth(depth);
             task.setStatus(GraphTaskStatus.PENDING);
             task = save(task);
 
-            Map<String, Object> created = client.createJob(repo.getGithubUrl(), repo.getRef(), 1);
+            Map<String, Object> created = client.createJob(repo.getGithubUrl(), ref, depth);
             String jobId = String.valueOf(created.get("job_id"));
             task.setGraphJobId(jobId);
             task.setStatus(GraphTaskStatus.SUBMITTED);
@@ -77,7 +92,7 @@ public class GraphTaskOrchestrator {
 
         } catch (Exception e) {
             log.error("Graph orchestration error repoId={}: {}", repoId, e.getMessage(), e);
-            if (task.getId() != null) {
+            if (task != null && task.getId() != null) {
                 task.setStatus(GraphTaskStatus.FAILED);
                 task.setErrorMessage(e.getMessage());
                 save(task);

@@ -11,12 +11,8 @@ import java.util.Map;
 public class GraphController {
 
     private final GraphService graphService;
-    private final RepoGraphTaskRepository taskRepo;
-
-    public GraphController(GraphService graphService,
-                           RepoGraphTaskRepository taskRepo) {
+    public GraphController(GraphService graphService) {
         this.graphService = graphService;
-        this.taskRepo = taskRepo;
     }
 
     @PostMapping("/graph-jobs")
@@ -39,12 +35,10 @@ public class GraphController {
         return ApiResponse.ok(graphService.getLatestReadyGraph(repoId));
     }
 
-    /** 查询最新 READY 图任务的元数据（用于前端显示 Job ID / 状态） */
+    /** 查询最新图任务的元数据（不限定 READY，供前端展示当前状态） */
     @GetMapping("/graph/repos/{repoId}/latest-task")
     public ApiResponse<RepoGraphTask> getLatestTask(@PathVariable Long repoId) {
-        return ApiResponse.ok(taskRepo
-                .findFirstByRepoIdAndStatusOrderByCreatedAtDesc(repoId, com.codekb.graph.GraphTaskStatus.READY)
-                .orElseThrow(() -> new com.codekb.common.BusinessException(404, "没有就绪的图任务")));
+        return ApiResponse.ok(graphService.getLatestTask(repoId));
     }
 
     record CreateTaskRequest(@NotNull Long repoId, String ref, Integer depth) {}
