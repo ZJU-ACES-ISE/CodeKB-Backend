@@ -1,0 +1,16 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+*.ear
+*.iml
+.idea/
+.vscode/
+*.log
+.DS_Store
+
+# Local overrides with secrets (never commit)
+src/main/resources/application.yml
+src/main/resources/application-local.yml
+src/main/resources/application-local.yaml

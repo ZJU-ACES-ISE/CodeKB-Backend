@@ -1,0 +1,76 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api/v1
+
+spring:
+  application:
+    name: codekb-server
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${CODEKB_DATASOURCE_URL:jdbc:mysql://127.0.0.1:3306/codekb?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    username: ${CODEKB_DATASOURCE_USERNAME:root}
+    password: ${CODEKB_DATASOURCE_PASSWORD:}
+    hikari:
+      maximum-pool-size: 8
+      minimum-idle: 1
+      connection-timeout: 10000
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate.dialect: org.hibernate.dialect.MySQLDialect
+      hibernate.format_sql: false
+      hibernate.jdbc.time_zone: Asia/Shanghai
+  data:
+    redis:
+      host: ${CODEKB_REDIS_HOST:127.0.0.1}
+      port: ${CODEKB_REDIS_PORT:6379}
+      password: ${CODEKB_REDIS_PASSWORD:}
+      database: ${CODEKB_REDIS_DATABASE:0}
+      timeout: 3s
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 8
+          max-idle: 4
+          min-idle: 0
+
+codekb:
+  jwt:
+    secret: ${CODEKB_JWT_SECRET:change-me-please-use-32-chars-min}
+    expire-hours: ${CODEKB_JWT_EXPIRE_HOURS:24}
+  oss:
+    endpoint: ${CODEKB_OSS_ENDPOINT:}
+    bucket: ${CODEKB_OSS_BUCKET:}
+    access-key-id: ${CODEKB_OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${CODEKB_OSS_ACCESS_KEY_SECRET:}
+    key-prefix: ${CODEKB_OSS_KEY_PREFIX:codekb/snapshots/}
+    url-prefix: ${CODEKB_OSS_URL_PREFIX:}
+  graph:
+    base-url: ${CODEKB_GRAPH_BASE_URL:http://127.0.0.1:6401}
+    poll-interval-ms: 1500
+    max-poll-times: 200
+    request-timeout-ms: 10000
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    com.codekb: INFO
+    org.hibernate.SQL: WARN
