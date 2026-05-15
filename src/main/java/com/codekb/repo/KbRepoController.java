@@ -62,11 +62,12 @@ public class KbRepoController {
     @GetMapping("/{id}")
     public ApiResponse<Map<String, Object>> get(@PathVariable Long id) {
         KbRepo repo = repoService.getById(id);
+        var summary = summaryRepository.findByRepoId(id).orElse(null);
+        var latestGraphTask = graphTaskRepository.findFirstByRepoIdOrderByCreatedAtDesc(id).orElse(null);
         Map<String, Object> result = new HashMap<>();
-        result.put("repo", repo);
-        result.put("summary", summaryRepository.findByRepoId(id).orElse(null));
-        result.put("latestGraphTask",
-                graphTaskRepository.findFirstByRepoIdOrderByCreatedAtDesc(id).orElse(null));
+        result.put("repo", repoService.toRepoView(repo, summary != null, latestGraphTask));
+        result.put("summary", summary);
+        result.put("latestGraphTask", latestGraphTask);
         return ApiResponse.ok(result);
     }
 

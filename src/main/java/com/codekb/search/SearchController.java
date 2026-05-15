@@ -11,6 +11,7 @@ import com.codekb.knowledge.KnowledgeBase;
 import com.codekb.knowledge.KnowledgeBaseRepository;
 import com.codekb.repo.KbRepo;
 import com.codekb.repo.KbRepoRepository;
+import com.codekb.repo.KbRepoService;
 import com.codekb.repo.RepoUrlParser;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -28,17 +29,20 @@ public class SearchController {
     private final RepoSummaryRepository summaryRepository;
     private final KnowledgeBaseRepository kbRepository;
     private final RepoGraphTaskRepository graphTaskRepository;
+    private final KbRepoService repoService;
     private final ObjectMapper objectMapper;
 
     public SearchController(KbRepoRepository repoRepository,
                             RepoSummaryRepository summaryRepository,
                             KnowledgeBaseRepository kbRepository,
                             RepoGraphTaskRepository graphTaskRepository,
+                            KbRepoService repoService,
                             ObjectMapper objectMapper) {
         this.repoRepository = repoRepository;
         this.summaryRepository = summaryRepository;
         this.kbRepository = kbRepository;
         this.graphTaskRepository = graphTaskRepository;
+        this.repoService = repoService;
         this.objectMapper = objectMapper;
     }
 
@@ -105,9 +109,15 @@ public class SearchController {
                 .filter(r -> r.getLanguage() != null && !r.getLanguage().isBlank())
                 .collect(Collectors.groupingBy(KbRepo::getLanguage, Collectors.counting()));
 
-        // 状态分布
-        Map<String, Long> statusDist = repos.stream()
-                .collect(Collectors.groupingBy(KbRepo::getStatus, Collectors.counting()));
+        Set<Long> summarizedRepoIds = summaries.stream()
+                .map(RepoSummary::getRepoId)
+                .collect(Collectors.toSet());
+
+        // 仓库状态分布：仅反映导入 / 摘要解析状态
+        Map<String, Long> repoStatusDist = repos.stream()
+                .collect(Collectors.groupingBy(
+                        repo -> repoService.normalizeRepoStatus(repo.getStatus(), summarizedRepoIds.contains(repo.getId())),
+                        Collectors.counting()));
         Map<String, Long> providerDist = repos.stream()
                 .collect(Collectors.groupingBy(this::providerOf, Collectors.counting()));
 
@@ -146,26 +156,40 @@ public class SearchController {
             }
         }
 
-        // 总节点/边数（从已完成的图任务）
-        long totalNodes = 0, totalEdges = 0;
-        for (KbRepo r : repos) {
-            Optional<RepoGraphTask> task = graphTaskRepository
-                    .findFirstByRepoIdAndStatusOrderByCreatedAtDesc(r.getId(), com.codekb.graph.GraphTaskStatus.READY);
-            if (task.isPresent()) {
-                totalNodes += task.get().getNodeCount() != null ? task.get().getNodeCount() : 0;
-                totalEdges += task.get().getEdgeCount() != null ? task.get().getEdgeCount() : 0;
+        // 图任务状态分布：反映每个仓库的最新图任务状态
+        Map<Long, RepoGraphTask> latestTaskByRepo = latestGraphTasks(repos);
+        Map<String, Long> graphTaskDist = new LinkedHashMap<>();
+        long totalNodes = 0;
+        long totalEdges = 0;
+        long graphReadyCount = 0;
+        for (KbRepo repo : repos) {
+            RepoGraphTask latestTask = latestTaskByRepo.get(repo.getId());
+            if (latestTask == null) {
+                graphTaskDist.merge("NONE", 1L, Long::sum);
+                continue;
+            }
+
+            String graphStatus = latestTask.getStatus().name();
+            graphTaskDist.merge(graphStatus, 1L, Long::sum);
+
+            if (latestTask.getStatus() == com.codekb.graph.GraphTaskStatus.READY) {
+                graphReadyCount += 1;
+                totalNodes += latestTask.getNodeCount() != null ? latestTask.getNodeCount() : 0;
+                totalEdges += latestTask.getEdgeCount() != null ? latestTask.getEdgeCount() : 0;
             }
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("kbCount", kbs.size());
         result.put("repoCount", repos.size());
-        result.put("graphReadyCount", statusDist.getOrDefault("GRAPH_READY", 0L));
+        result.put("graphReadyCount", graphReadyCount);
         result.put("totalNodes", totalNodes);
         result.put("totalEdges", totalEdges);
         result.put("languageDistribution", sortedByValue(langDist));
         result.put("providerDistribution", sortedByValue(providerDist));
-        result.put("statusDistribution", statusDist);
+        result.put("repoStatusDistribution", sortedByValue(repoStatusDist));
+        result.put("statusDistribution", sortedByValue(repoStatusDist));
+        result.put("graphTaskDistribution", sortedByValue(graphTaskDist));
         result.put("topicDistribution", sortedByValue(topicDist));
         result.put("topStarRepos", topStars);
         result.put("knowledgeBases", kbs.stream().map(kb -> {
@@ -228,6 +252,18 @@ public class SearchController {
 
     private String providerOf(KbRepo repo) {
         return RepoUrlParser.parse(repo.getGithubUrl(), repo.getProvider()).provider().key();
+    }
+
+    private Map<Long, RepoGraphTask> latestGraphTasks(List<KbRepo> repos) {
+        List<Long> repoIds = repos.stream().map(KbRepo::getId).toList();
+        Map<Long, RepoGraphTask> latestTasks = new HashMap<>();
+        if (repoIds.isEmpty()) {
+            return latestTasks;
+        }
+        for (RepoGraphTask task : graphTaskRepository.findByRepoIdInOrderByRepoIdAscCreatedAtDesc(repoIds)) {
+            latestTasks.putIfAbsent(task.getRepoId(), task);
+        }
+        return latestTasks;
     }
 
     private String langExt(String lang) {

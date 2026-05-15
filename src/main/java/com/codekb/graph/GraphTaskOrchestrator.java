@@ -97,7 +97,6 @@ public class GraphTaskOrchestrator {
                 task.setErrorMessage(e.getMessage());
                 save(task);
             }
-            repoService.updateStatus(repoId, "FAILED");
         }
     }
 
@@ -127,14 +126,12 @@ public class GraphTaskOrchestrator {
                 task.setStatus(GraphTaskStatus.READY);
                 task.setCompletedAt(LocalDateTime.now());
                 save(task);
-                repoService.updateStatus(repoId, "GRAPH_READY");
                 log.info("Graph task READY: taskId={} nodes={} edges={}", task.getId(), task.getNodeCount(), task.getEdgeCount());
                 return;
             } else if ("failed".equals(ext)) {
                 task.setStatus(GraphTaskStatus.FAILED);
                 task.setErrorMessage(String.valueOf(status.getOrDefault("error", "external service failed")));
                 save(task);
-                repoService.updateStatus(repoId, "FAILED");
                 log.warn("Graph task FAILED: taskId={}", task.getId());
                 return;
             } else {
@@ -148,7 +145,6 @@ public class GraphTaskOrchestrator {
         task.setStatus(GraphTaskStatus.FAILED);
         task.setErrorMessage("超过最大轮询次数 " + maxPolls);
         save(task);
-        repoService.updateStatus(repoId, "FAILED");
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

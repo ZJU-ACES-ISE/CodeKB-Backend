@@ -58,7 +58,6 @@ public class GraphZipUploadService {
                 task.setErrorMessage(e.getMessage());
                 orchestrator.save(task);
             }
-            repoService.updateStatus(repoId, "FAILED");
         }
     }
 

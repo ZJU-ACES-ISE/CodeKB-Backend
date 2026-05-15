@@ -48,7 +48,7 @@ public class KnowledgeBaseController {
     @GetMapping("/{id}/repos")
     public ApiResponse<?> listRepos(@PathVariable Long id) {
         kbService.getById(id); // 404 guard
-        return ApiResponse.ok(repoService.listByKb(id));
+        return ApiResponse.ok(repoService.listRepoViewsByKb(id));
     }
 
     record CreateRequest(@NotBlank String name, String description) {}

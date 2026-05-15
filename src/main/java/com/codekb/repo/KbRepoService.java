@@ -16,7 +16,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class KbRepoService {
@@ -111,6 +117,10 @@ public class KbRepoService {
         return repoRepo.findByKbId(kbId);
     }
 
+    public List<Map<String, Object>> listRepoViewsByKb(Long kbId) {
+        return toRepoViews(repoRepo.findByKbId(kbId));
+    }
+
     public KbRepo getById(Long id) {
         return repoRepo.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "仓库不存在: " + id));
@@ -164,5 +174,67 @@ public class KbRepoService {
             }
         }
         log.info("Deleted repo {} (kbId={}), cascaded {} graph tasks", repoId, kbId, tasks.size());
+    }
+
+    public Map<String, Object> toRepoView(KbRepo repo) {
+        boolean hasSummary = summaryRepository.findByRepoId(repo.getId()).isPresent();
+        RepoGraphTask latestGraphTask = graphTaskRepository.findFirstByRepoIdOrderByCreatedAtDesc(repo.getId()).orElse(null);
+        return toRepoView(repo, hasSummary, latestGraphTask);
+    }
+
+    Map<String, Object> toRepoView(KbRepo repo, boolean hasSummary, RepoGraphTask latestGraphTask) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", repo.getId());
+        view.put("kbId", repo.getKbId());
+        view.put("name", repo.getName());
+        view.put("owner", repo.getOwner());
+        view.put("repo", repo.getRepo());
+        view.put("provider", repo.getProvider());
+        view.put("githubUrl", repo.getGithubUrl());
+        view.put("ref", repo.getRef());
+        view.put("defaultBranch", repo.getDefaultBranch());
+        view.put("language", repo.getLanguage());
+        view.put("framework", repo.getFramework());
+        view.put("starCount", repo.getStarCount());
+        view.put("status", normalizeRepoStatus(repo.getStatus(), hasSummary));
+        view.put("createdBy", repo.getCreatedBy());
+        view.put("createdAt", repo.getCreatedAt());
+        view.put("updatedAt", repo.getUpdatedAt());
+        view.put("latestGraphTask", latestGraphTask);
+        return view;
+    }
+
+    public String normalizeRepoStatus(String rawStatus, boolean hasSummary) {
+        if (hasSummary || "SUMMARIZED".equals(rawStatus) || "GRAPH_READY".equals(rawStatus)) {
+            return "SUMMARIZED";
+        }
+        if ("FAILED".equals(rawStatus)) {
+            return "FAILED";
+        }
+        return "IMPORTED";
+    }
+
+    private List<Map<String, Object>> toRepoViews(List<KbRepo> repos) {
+        if (repos.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> repoIds = repos.stream().map(KbRepo::getId).toList();
+        Set<Long> summarizedRepoIds = summaryRepository.findByRepoIdIn(repoIds).stream()
+                .map(summary -> summary.getRepoId())
+                .collect(Collectors.toSet());
+        Map<Long, RepoGraphTask> latestGraphTasks = latestGraphTasks(repoIds);
+
+        return repos.stream()
+                .map(repo -> toRepoView(repo, summarizedRepoIds.contains(repo.getId()), latestGraphTasks.get(repo.getId())))
+                .toList();
+    }
+
+    private Map<Long, RepoGraphTask> latestGraphTasks(Collection<Long> repoIds) {
+        Map<Long, RepoGraphTask> latestTasks = new HashMap<>();
+        for (RepoGraphTask task : graphTaskRepository.findByRepoIdInOrderByRepoIdAscCreatedAtDesc(repoIds)) {
+            latestTasks.putIfAbsent(task.getRepoId(), task);
+        }
+        return latestTasks;
     }
 }
