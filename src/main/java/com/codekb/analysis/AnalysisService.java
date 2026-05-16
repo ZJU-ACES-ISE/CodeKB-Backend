@@ -22,7 +22,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
-import java.net.URLEncoder;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -158,12 +158,14 @@ public class AnalysisService {
                         }
                     }
                     case GITLAB -> {
-                        String projectPath = parts.owner() + "/" + parts.repo();
+                        String projectPath = parts.projectPath() != null && !parts.projectPath().isBlank()
+                                ? parts.projectPath()
+                                : parts.owner() + "/" + parts.repo();
                         String encodedProject = encodeProjectPath(projectPath);
                         String gitlabHost = parts.host() != null && !parts.host().isBlank() ? parts.host() : "gitlab.com";
                         String base = "https://" + gitlabHost + "/api/v4/projects/" + encodedProject;
                         try {
-                            String body = defaultClient.get().uri(base + "?statistics=true").retrieve().body(String.class);
+                            String body = defaultClient.get().uri(URI.create(base + "?statistics=true")).retrieve().body(String.class);
                             JsonNode node = objectMapper.readTree(body);
                             description = node.path("description").asText("");
                             starCount = node.path("star_count").asInt(0);
@@ -183,7 +185,7 @@ public class AnalysisService {
                         }
 
                         try {
-                            String body = defaultClient.get().uri(base + "/languages").retrieve().body(String.class);
+                            String body = defaultClient.get().uri(URI.create(base + "/languages")).retrieve().body(String.class);
                             JsonNode node = objectMapper.readTree(body);
                             node.fieldNames().forEachRemaining(f -> {
                                 double percent = node.path(f).asDouble(0);
@@ -196,7 +198,7 @@ public class AnalysisService {
                         }
 
                         try {
-                            String body = defaultClient.get().uri(base + "/repository/contributors?per_page=10").retrieve().body(String.class);
+                            String body = defaultClient.get().uri(URI.create(base + "/repository/contributors?per_page=10")).retrieve().body(String.class);
                             JsonNode arr = objectMapper.readTree(body);
                             if (arr.isArray()) {
                                 for (JsonNode c : arr) {
@@ -390,7 +392,11 @@ public class AnalysisService {
     }
 
     private String encodeProjectPath(String projectPath) {
-        return URLEncoder.encode(projectPath, StandardCharsets.UTF_8).replace("+", "%20");
+        if (projectPath == null || projectPath.isBlank()) {
+            return "";
+        }
+        String normalized = projectPath.trim();
+        return normalized.replace("/", "%2F").replace(" ", "%20");
     }
 
     private String nullableText(JsonNode node, String field) {
