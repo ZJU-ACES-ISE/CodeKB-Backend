@@ -65,7 +65,7 @@ public class KbRepoController {
         var summary = summaryRepository.findByRepoId(id).orElse(null);
         var latestGraphTask = graphTaskRepository.findFirstByRepoIdOrderByCreatedAtDesc(id).orElse(null);
         Map<String, Object> result = new HashMap<>();
-        result.put("repo", repoService.toRepoView(repo, summary != null, latestGraphTask));
+        result.put("repo", repoService.toRepoView(repo, summary, latestGraphTask));
         result.put("summary", summary);
         result.put("latestGraphTask", latestGraphTask);
         return ApiResponse.ok(result);

@@ -1,5 +1,7 @@
 package com.codekb.repo;
 
+import com.codekb.analysis.FrameworkInference;
+import com.codekb.analysis.RepoSummary;
 import com.codekb.analysis.RepoSummaryRepository;
 import com.codekb.common.BusinessException;
 import com.codekb.event.RepoImportedEvent;
@@ -8,6 +10,7 @@ import com.codekb.graph.OssService;
 import com.codekb.graph.RepoGraphTask;
 import com.codekb.graph.RepoGraphTaskRepository;
 import com.codekb.knowledge.KnowledgeBaseService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -21,7 +24,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,6 +39,7 @@ public class KbRepoService {
     private final RepoGraphTaskRepository graphTaskRepository;
     private final OssService ossService;
     private final GraphZipUploadService graphZipUploadService;
+    private final ObjectMapper objectMapper;
 
     public KbRepoService(KbRepoRepository repoRepo,
                          KnowledgeBaseService kbService,
@@ -43,7 +47,8 @@ public class KbRepoService {
                          RepoSummaryRepository summaryRepository,
                          RepoGraphTaskRepository graphTaskRepository,
                          @Lazy OssService ossService,
-                         @Lazy GraphZipUploadService graphZipUploadService) {
+                         @Lazy GraphZipUploadService graphZipUploadService,
+                         ObjectMapper objectMapper) {
         this.repoRepo = repoRepo;
         this.kbService = kbService;
         this.eventPublisher = eventPublisher;
@@ -51,6 +56,7 @@ public class KbRepoService {
         this.graphTaskRepository = graphTaskRepository;
         this.ossService = ossService;
         this.graphZipUploadService = graphZipUploadService;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -136,9 +142,20 @@ public class KbRepoService {
 
     @Transactional
     public void updateLanguageAndStar(Long repoId, String language, Integer starCount) {
+        updateSummaryFields(repoId, language, starCount, null, null);
+    }
+
+    @Transactional
+    public void updateSummaryFields(Long repoId,
+                                    String language,
+                                    Integer starCount,
+                                    String defaultBranch,
+                                    String framework) {
         repoRepo.findById(repoId).ifPresent(r -> {
-            if (language != null) r.setLanguage(language);
+            if (language != null && !language.isBlank()) r.setLanguage(language);
             if (starCount != null) r.setStarCount(starCount);
+            if (defaultBranch != null && !defaultBranch.isBlank()) r.setDefaultBranch(defaultBranch);
+            if (framework != null && !framework.isBlank()) r.setFramework(framework);
             repoRepo.save(r);
         });
     }
@@ -177,12 +194,12 @@ public class KbRepoService {
     }
 
     public Map<String, Object> toRepoView(KbRepo repo) {
-        boolean hasSummary = summaryRepository.findByRepoId(repo.getId()).isPresent();
+        RepoSummary summary = summaryRepository.findByRepoId(repo.getId()).orElse(null);
         RepoGraphTask latestGraphTask = graphTaskRepository.findFirstByRepoIdOrderByCreatedAtDesc(repo.getId()).orElse(null);
-        return toRepoView(repo, hasSummary, latestGraphTask);
+        return toRepoView(repo, summary, latestGraphTask);
     }
 
-    Map<String, Object> toRepoView(KbRepo repo, boolean hasSummary, RepoGraphTask latestGraphTask) {
+    public Map<String, Object> toRepoView(KbRepo repo, RepoSummary summary, RepoGraphTask latestGraphTask) {
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("id", repo.getId());
         view.put("kbId", repo.getKbId());
@@ -192,11 +209,11 @@ public class KbRepoService {
         view.put("provider", repo.getProvider());
         view.put("githubUrl", repo.getGithubUrl());
         view.put("ref", repo.getRef());
-        view.put("defaultBranch", repo.getDefaultBranch());
-        view.put("language", repo.getLanguage());
-        view.put("framework", repo.getFramework());
+        view.put("defaultBranch", firstNonBlank(repo.getDefaultBranch(), summary != null ? summary.getDefaultBranch() : null));
+        view.put("language", firstNonBlank(repo.getLanguage(), summary != null ? summary.getPrimaryLanguage() : null));
+        view.put("framework", firstNonBlank(repo.getFramework(), frameworkLabel(summary)));
         view.put("starCount", repo.getStarCount());
-        view.put("status", normalizeRepoStatus(repo.getStatus(), hasSummary));
+        view.put("status", normalizeRepoStatus(repo.getStatus(), summary != null));
         view.put("createdBy", repo.getCreatedBy());
         view.put("createdAt", repo.getCreatedAt());
         view.put("updatedAt", repo.getUpdatedAt());
@@ -205,7 +222,7 @@ public class KbRepoService {
     }
 
     public String normalizeRepoStatus(String rawStatus, boolean hasSummary) {
-        if (hasSummary || "SUMMARIZED".equals(rawStatus) || "GRAPH_READY".equals(rawStatus)) {
+        if (hasSummary || "SUMMARIZED".equals(rawStatus)) {
             return "SUMMARIZED";
         }
         if ("FAILED".equals(rawStatus)) {
@@ -220,13 +237,12 @@ public class KbRepoService {
         }
 
         List<Long> repoIds = repos.stream().map(KbRepo::getId).toList();
-        Set<Long> summarizedRepoIds = summaryRepository.findByRepoIdIn(repoIds).stream()
-                .map(summary -> summary.getRepoId())
-                .collect(Collectors.toSet());
+        Map<Long, RepoSummary> summariesByRepoId = summaryRepository.findByRepoIdIn(repoIds).stream()
+                .collect(Collectors.toMap(RepoSummary::getRepoId, Function.identity(), (a, b) -> a));
         Map<Long, RepoGraphTask> latestGraphTasks = latestGraphTasks(repoIds);
 
         return repos.stream()
-                .map(repo -> toRepoView(repo, summarizedRepoIds.contains(repo.getId()), latestGraphTasks.get(repo.getId())))
+                .map(repo -> toRepoView(repo, summariesByRepoId.get(repo.getId()), latestGraphTasks.get(repo.getId())))
                 .toList();
     }
 
@@ -236,5 +252,26 @@ public class KbRepoService {
             latestTasks.putIfAbsent(task.getRepoId(), task);
         }
         return latestTasks;
+    }
+
+    private String frameworkLabel(RepoSummary summary) {
+        if (summary == null) {
+            return null;
+        }
+        List<String> labels = FrameworkInference.labelsFromFrameworksJson(summary.getFrameworks(), objectMapper);
+        if (labels.isEmpty()) {
+            labels = FrameworkInference.labelsFromTopicsJson(summary.getTopics(), objectMapper);
+        }
+        return labels.isEmpty() ? null : labels.get(0);
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        if (second != null && !second.isBlank()) {
+            return second;
+        }
+        return null;
     }
 }

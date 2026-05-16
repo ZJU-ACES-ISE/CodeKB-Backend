@@ -14,10 +14,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -34,6 +37,8 @@ public class AnalysisService {
     private final ObjectMapper objectMapper;
     private final RestClient githubClient;
     private final RestClient defaultClient;
+    private final boolean githubTokenConfigured;
+    private final String githubTokenSource;
 
     public AnalysisService(KbRepoService repoService,
                            RepoSummaryRepository summaryRepo,
@@ -51,16 +56,33 @@ public class AnalysisService {
         RestClient.Builder builder = RestClient.builder()
                 .defaultHeader(HttpHeaders.USER_AGENT, "CodeKB-Demo/0.1")
                 .defaultHeader(HttpHeaders.ACCEPT, "application/vnd.github+json");
-        String token = githubApiProperties.getToken();
+        String token = githubApiProperties.resolveToken();
         if (token != null && !token.isBlank()) {
             builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + token.trim());
         }
         this.githubClient = builder.build();
+        this.githubTokenConfigured = githubApiProperties.hasToken();
+        this.githubTokenSource = githubApiProperties.tokenSource();
+        if (githubTokenConfigured) {
+            log.info("GitHub API token configured via {}", githubTokenSource);
+        } else {
+            log.warn("GitHub API token not configured. Set codekb.github.token or one of CODEKB_GITHUB_TOKEN / GITHUB_TOKEN / GH_TOKEN to avoid rate limiting.");
+        }
     }
 
+    @Async("codekbAsyncExecutor")
+    public void reanalyze(Long repoId) {
+        repoService.updateStatus(repoId, "IMPORTED");
+        analyze(repoId, false);
+    }
+
+    @Async("codekbAsyncExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void handleRepoImported(RepoImportedEvent event) {
-        Long repoId = event.getRepoId();
+        analyze(event.getRepoId(), true);
+    }
+
+    private void analyze(Long repoId, boolean requestGraph) {
         log.info("Analysis triggered for repoId={}", repoId);
         try {
             KbRepo repo = repoService.getById(repoId);
@@ -214,7 +236,7 @@ public class AnalysisService {
                             JsonNode topicsNode = node.path("topics");
                             if (topicsNode.isArray()) topicsNode.forEach(t -> topics.add(t.asText()));
                         } catch (Exception e) {
-                            log.warn("GitHub repo info failed for {}/{}: {}", parts.owner(), parts.repo(), e.getMessage());
+                            logGithubApiFailure("repo info", parts, e);
                         }
 
                         try {
@@ -222,7 +244,7 @@ public class AnalysisService {
                             JsonNode node = objectMapper.readTree(body);
                             node.fieldNames().forEachRemaining(f -> languageBytes.put(f, node.path(f).asInt(0)));
                         } catch (Exception e) {
-                            log.warn("GitHub languages failed: {}", e.getMessage());
+                            logGithubApiFailure("languages", parts, e);
                         }
 
                         try {
@@ -239,7 +261,7 @@ public class AnalysisService {
                                 }
                             }
                         } catch (Exception e) {
-                            log.warn("GitHub contributors failed: {}", e.getMessage());
+                            logGithubApiFailure("contributors", parts, e);
                         }
                     }
                     case LOCAL, ZIP, OTHER -> { }
@@ -278,13 +300,18 @@ public class AnalysisService {
                     sizeKb, license, defaultBranch));
 
             summaryRepo.save(summary);
-            repoService.updateLanguageAndStar(repoId, language, starCount);
+            repoService.updateSummaryFields(
+                    repoId,
+                    language,
+                    starCount,
+                    defaultBranch,
+                    frameworks.isEmpty() ? null : frameworks.get(0));
             repoService.updateStatus(repoId, "SUMMARIZED");
             log.info("Summary saved for repoId={} lang={} topics={} contributors={}",
                     repoId, language, topics.size(), contributors.size());
 
             String gh = repo.getGithubUrl();
-            if (gh == null || !gh.startsWith("upload://")) {
+            if (requestGraph && (gh == null || !gh.startsWith("upload://"))) {
                 eventPublisher.publishEvent(new GraphJobRequestedEvent(this, repoId));
             }
         } catch (Exception e) {
@@ -371,5 +398,29 @@ public class AnalysisService {
         if (v.isMissingNode() || v.isNull()) return null;
         String s = v.asText("");
         return s.isBlank() ? null : s;
+    }
+
+    private void logGithubApiFailure(String operation, RepoUrlParts parts, Exception e) {
+        String repoRef = parts.owner() + "/" + parts.repo();
+        if (e instanceof RestClientResponseException responseException) {
+            HttpStatusCode status = responseException.getStatusCode();
+            String body = responseException.getResponseBodyAsString();
+            if (status.value() == 403 && body != null && body.contains("API rate limit exceeded")) {
+                if (githubTokenConfigured) {
+                    log.warn("GitHub {} failed for {} due to rate limit even though token source={} is configured: {}",
+                            operation, repoRef, githubTokenSource, responseException.getMessage());
+                } else {
+                    log.warn("GitHub {} failed for {} due to unauthenticated rate limit. Configure CODEKB_GITHUB_TOKEN, GITHUB_TOKEN, or GH_TOKEN, then restart the backend. Response: {}",
+                            operation, repoRef, responseException.getMessage());
+                }
+                return;
+            }
+            if (status.value() == 401) {
+                log.warn("GitHub {} failed for {} with 401 Unauthorized. Check token source={} and restart the backend after updating it. Response: {}",
+                        operation, repoRef, githubTokenSource, responseException.getMessage());
+                return;
+            }
+        }
+        log.warn("GitHub {} failed for {}: {}", operation, repoRef, e.getMessage());
     }
 }

@@ -53,8 +53,10 @@ codekb:
     poll-interval-ms: 1500
     max-poll-times: 200
     request-timeout-ms: 10000
+  # Preferred env var: CODEKB_GITHUB_TOKEN
+  # Compatible fallbacks: GITHUB_TOKEN, GH_TOKEN
   github:
-    token: ${CODEKB_GITHUB_TOKEN:}
+    token: ${CODEKB_GITHUB_TOKEN:${GITHUB_TOKEN:${GH_TOKEN:}}}
 
 springdoc:
   api-docs:
