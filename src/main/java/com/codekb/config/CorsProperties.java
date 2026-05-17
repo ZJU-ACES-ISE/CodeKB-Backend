@@ -8,17 +8,18 @@ import java.util.List;
 @ConfigurationProperties(prefix = "codekb.cors")
 public class CorsProperties {
 
-    private List<String> allowedOrigins = new ArrayList<>(List.of(
-            "http://localhost:5173",
-            "http://localhost:4173",
-            "https://codekb.graywolf.top"
+    private List<String> allowedOriginPatterns = new ArrayList<>(List.of(
+            "http://localhost:*",
+            "https://localhost:*",
+            "http://*.graywolf.top",
+            "https://*.graywolf.top"
     ));
 
-    public List<String> getAllowedOrigins() {
-        return allowedOrigins;
+    public List<String> getAllowedOriginPatterns() {
+        return allowedOriginPatterns;
     }
 
-    public void setAllowedOrigins(List<String> allowedOrigins) {
-        this.allowedOrigins = allowedOrigins != null ? new ArrayList<>(allowedOrigins) : new ArrayList<>();
+    public void setAllowedOriginPatterns(List<String> allowedOriginPatterns) {
+        this.allowedOriginPatterns = allowedOriginPatterns != null ? new ArrayList<>(allowedOriginPatterns) : new ArrayList<>();
     }
 }

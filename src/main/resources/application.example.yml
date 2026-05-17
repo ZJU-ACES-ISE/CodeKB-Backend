@@ -39,10 +39,11 @@ spring:
 
 codekb:
   cors:
-    allowed-origins:
-      - http://localhost:5173
-      - http://localhost:4173
-      - https://codekb.graywolf.top
+    allowed-origin-patterns:
+      - http://localhost:*
+      - https://localhost:*
+      - http://*.graywolf.top
+      - https://*.graywolf.top
   jwt:
     secret: ${CODEKB_JWT_SECRET:change-me-please-use-32-chars-min}
     expire-hours: ${CODEKB_JWT_EXPIRE_HOURS:24}
