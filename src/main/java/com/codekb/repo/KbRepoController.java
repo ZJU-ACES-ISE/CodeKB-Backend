@@ -36,7 +36,7 @@ public class KbRepoController {
             @AuthenticationPrincipal CodeKbPrincipal principal,
             @RequestBody @Valid ImportRequest req) {
         KbRepo saved = repoService.importRepo(
-                req.kbId(), req.githubUrl(), req.provider(), req.ref(),
+                req.kbId(), req.githubUrl(), req.provider(), req.repoName(), req.ref(),
                 req.depth() != null ? req.depth() : 1,
                 principal.userId());
         Map<String, Object> resp = new HashMap<>();
@@ -80,6 +80,7 @@ public class KbRepoController {
     record ImportRequest(@NotNull Long kbId,
                          @NotBlank String githubUrl,
                          String provider,
+                         String repoName,
                          String ref,
                          Integer depth) {}
 }

@@ -27,8 +27,26 @@ mvn spring-boot:run
 
 ## Run
 
-```bash
-mvn spring-boot:run
+This project needs JDK 17+, and the current local machine already has `JDK 21`.
+
+Recommended on Windows PowerShell:
+
+```powershell
+.\scripts\run-local.ps1
+```
+
+The script does three things before startup:
+
+1. switches the shell to `C:\Program Files\Java\jdk-21`
+2. removes stale `target/` output that can break Maven incremental compile on Chinese Windows paths
+3. runs `mvn spring-boot:run`
+
+Manual startup is still available:
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-21"
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+mvn clean spring-boot:run
 ```
 
 API base path: `http://localhost:8080/api/v1`

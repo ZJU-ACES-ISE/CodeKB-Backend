@@ -39,6 +39,7 @@ public class KbRepoService {
     private final RepoGraphTaskRepository graphTaskRepository;
     private final OssService ossService;
     private final GraphZipUploadService graphZipUploadService;
+    private final LocalRepoZipService localRepoZipService;
     private final ObjectMapper objectMapper;
 
     public KbRepoService(KbRepoRepository repoRepo,
@@ -48,6 +49,7 @@ public class KbRepoService {
                          RepoGraphTaskRepository graphTaskRepository,
                          @Lazy OssService ossService,
                          @Lazy GraphZipUploadService graphZipUploadService,
+                         LocalRepoZipService localRepoZipService,
                          ObjectMapper objectMapper) {
         this.repoRepo = repoRepo;
         this.kbService = kbService;
@@ -56,11 +58,23 @@ public class KbRepoService {
         this.graphTaskRepository = graphTaskRepository;
         this.ossService = ossService;
         this.graphZipUploadService = graphZipUploadService;
+        this.localRepoZipService = localRepoZipService;
         this.objectMapper = objectMapper;
     }
 
     @Transactional
-    public KbRepo importRepo(Long kbId, String githubUrl, String providerHint, String ref, Integer depth, Long userId) {
+    public KbRepo importRepo(Long kbId,
+                             String githubUrl,
+                             String providerHint,
+                             String repoName,
+                             String ref,
+                             Integer depth,
+                             Long userId) {
+        RepoUrlParts parts = RepoUrlParser.parse(githubUrl, providerHint);
+        if (parts.provider() == RepoProvider.LOCAL) {
+            return importLocalDirectory(kbId, githubUrl, repoName, ref, userId);
+        }
+
         kbService.getById(kbId); // 404 guard
 
         KbRepo entity = new KbRepo();
@@ -68,11 +82,10 @@ public class KbRepoService {
         entity.setGithubUrl(githubUrl);
         entity.setRef(ref);
         entity.setCreatedBy(userId);
-        RepoUrlParts parts = RepoUrlParser.parse(githubUrl, providerHint);
         entity.setProvider(parts.provider().key());
         entity.setOwner(parts.owner());
         entity.setRepo(parts.repo());
-        entity.setName(parts.name());
+        entity.setName(normalizeRepoName(repoName, parts.name()));
 
         KbRepo saved = repoRepo.save(entity);
         kbService.incrementRepoCount(kbId);
@@ -116,6 +129,29 @@ public class KbRepoService {
         kbService.incrementRepoCount(kbId);
         eventPublisher.publishEvent(new RepoImportedEvent(this, saved.getId()));
         graphZipUploadService.submit(saved.getId(), zipBytes, fn, repoNameOpt);
+        return saved;
+    }
+
+    /**
+     * 本地目录：后端直接读取服务器上的绝对路径，打包为 ZIP 后复用现有 Graph 上传链路。
+     */
+    @Transactional
+    public KbRepo importLocalDirectory(Long kbId, String githubUrl, String repoName, String ref, Long userId) {
+        kbService.getById(kbId);
+        String localPath = extractLocalPath(githubUrl);
+        LocalRepoZipService.LocalRepoDescriptor descriptor = localRepoZipService.describe(localPath, repoName);
+
+        KbRepo entity = new KbRepo();
+        entity.setKbId(kbId);
+        entity.setGithubUrl(githubUrl);
+        entity.setProvider(RepoProvider.LOCAL.key());
+        entity.setRef(ref);
+        entity.setCreatedBy(userId);
+        entity.setName(normalizeRepoName(repoName, descriptor.repoName()));
+
+        KbRepo saved = repoRepo.save(entity);
+        kbService.incrementRepoCount(kbId);
+        eventPublisher.publishEvent(new RepoImportedEvent(this, saved.getId()));
         return saved;
     }
 
@@ -244,6 +280,24 @@ public class KbRepoService {
         return repos.stream()
                 .map(repo -> toRepoView(repo, summariesByRepoId.get(repo.getId()), latestGraphTasks.get(repo.getId())))
                 .toList();
+    }
+
+    private String extractLocalPath(String githubUrl) {
+        if (githubUrl == null || !githubUrl.startsWith("local://")) {
+            throw new BusinessException(400, "本地目录地址必须使用 local:// 前缀");
+        }
+        String localPath = githubUrl.substring("local://".length()).trim();
+        if (localPath.isBlank()) {
+            throw new BusinessException(400, "本地目录路径不能为空");
+        }
+        return localPath;
+    }
+
+    private String normalizeRepoName(String requestedName, String fallbackName) {
+        if (requestedName != null && !requestedName.isBlank()) {
+            return requestedName.trim();
+        }
+        return fallbackName;
     }
 
     private Map<Long, RepoGraphTask> latestGraphTasks(Collection<Long> repoIds) {

@@ -3,6 +3,8 @@ package com.codekb.graph;
 import com.codekb.config.GraphServiceProperties;
 import com.codekb.event.GraphJobRequestedEvent;
 import com.codekb.repo.KbRepoService;
+import com.codekb.repo.LocalRepoZipService;
+import com.codekb.repo.RepoProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,28 +23,32 @@ import java.util.Map;
 public class GraphTaskOrchestrator {
 
     private static final Logger log = LoggerFactory.getLogger(GraphTaskOrchestrator.class);
+
     private final RepoGraphTaskRepository taskRepo;
     private final GraphServiceClient client;
     private final OssService ossService;
     private final KbRepoService repoService;
     private final ObjectMapper objectMapper;
     private final GraphServiceProperties props;
+    private final LocalRepoZipService localRepoZipService;
 
     @Value("${codekb.oss.key-prefix:codekb/snapshots/}")
     private String ossKeyPrefix;
 
     public GraphTaskOrchestrator(RepoGraphTaskRepository taskRepo,
-                                  GraphServiceClient client,
-                                  OssService ossService,
-                                  KbRepoService repoService,
-                                  ObjectMapper objectMapper,
-                                  GraphServiceProperties props) {
+                                 GraphServiceClient client,
+                                 OssService ossService,
+                                 KbRepoService repoService,
+                                 ObjectMapper objectMapper,
+                                 GraphServiceProperties props,
+                                 LocalRepoZipService localRepoZipService) {
         this.taskRepo = taskRepo;
         this.client = client;
         this.ossService = ossService;
         this.repoService = repoService;
         this.objectMapper = objectMapper;
         this.props = props;
+        this.localRepoZipService = localRepoZipService;
     }
 
     @Async
@@ -80,16 +86,25 @@ public class GraphTaskOrchestrator {
             task.setStatus(GraphTaskStatus.PENDING);
             task = save(task);
 
-            Map<String, Object> created = client.createJob(repo.getGithubUrl(), ref, depth);
-            String jobId = String.valueOf(created.get("job_id"));
+            String jobId;
+            if (RepoProvider.LOCAL.key().equals(repo.getProvider())) {
+                LocalRepoZipService.LocalRepoArchive archive =
+                        localRepoZipService.archive(extractLocalPath(repo.getGithubUrl()), repo.getName());
+                Map<String, Object> created = client.uploadJob(archive.bytes(), archive.filename(), archive.repoName());
+                jobId = extractJobId(created);
+                log.info("Local graph job submitted via ZIP upload: jobId={} taskId={}", jobId, task.getId());
+            } else {
+                Map<String, Object> created = client.createJob(repo.getGithubUrl(), ref, depth);
+                jobId = extractJobId(created);
+                log.info("Graph job submitted: jobId={} taskId={}", jobId, task.getId());
+            }
+
             task.setGraphJobId(jobId);
             task.setStatus(GraphTaskStatus.SUBMITTED);
             task.setSubmittedAt(LocalDateTime.now());
             task = save(task);
-            log.info("Graph job submitted: jobId={} taskId={}", jobId, task.getId());
 
             pollJobToCompletion(task, repoId, jobId);
-
         } catch (Exception e) {
             log.error("Graph orchestration error repoId={}: {}", repoId, e.getMessage(), e);
             if (task != null && task.getId() != null) {
@@ -100,9 +115,6 @@ public class GraphTaskOrchestrator {
         }
     }
 
-    /**
-     * 提交 job_id 后轮询直至完成 / 失败 / 超时（供 Git URL 构图与 ZIP 上传共用）。
-     */
     public void pollJobToCompletion(RepoGraphTask task, Long repoId, String jobId) throws Exception {
         int maxPolls = props.getMaxPollTimes();
         long interval = props.getPollIntervalMs();
@@ -139,7 +151,9 @@ public class GraphTaskOrchestrator {
                 save(task);
             }
 
-            if (i % 20 == 0) log.info("Polling graph job {} attempt {}/{}", jobId, i + 1, maxPolls);
+            if (i % 20 == 0) {
+                log.info("Polling graph job {} attempt {}/{}", jobId, i + 1, maxPolls);
+            }
         }
 
         task.setStatus(GraphTaskStatus.FAILED);
@@ -150,5 +164,27 @@ public class GraphTaskOrchestrator {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public RepoGraphTask save(RepoGraphTask task) {
         return taskRepo.save(task);
+    }
+
+    private String extractJobId(Map<String, Object> body) {
+        Object value = body.get("job_id");
+        if (value == null) {
+            value = body.get("jobId");
+        }
+        if (value == null) {
+            throw new IllegalStateException("Graph response missing job_id: " + body);
+        }
+        return String.valueOf(value);
+    }
+
+    private String extractLocalPath(String githubUrl) {
+        if (githubUrl == null || !githubUrl.startsWith("local://")) {
+            throw new IllegalArgumentException("Invalid local repo url: " + githubUrl);
+        }
+        String localPath = githubUrl.substring("local://".length()).trim();
+        if (localPath.isBlank()) {
+            throw new IllegalArgumentException("Local repo path is blank");
+        }
+        return localPath;
     }
 }
