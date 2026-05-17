@@ -57,7 +57,15 @@ public class KbRepo {
     private LocalDateTime updatedAt;
 
     @PrePersist
-    void prePersist() { createdAt = updatedAt = LocalDateTime.now(); }
+    void prePersist() {
+        LocalDateTime now = LocalDateTime.now();
+        if (createdAt == null) {
+            createdAt = now;
+        }
+        if (updatedAt == null) {
+            updatedAt = createdAt;
+        }
+    }
 
     @PreUpdate
     void preUpdate() { updatedAt = LocalDateTime.now(); }
@@ -90,5 +98,7 @@ public class KbRepo {
     public Long getCreatedBy() { return createdBy; }
     public void setCreatedBy(Long createdBy) { this.createdBy = createdBy; }
     public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

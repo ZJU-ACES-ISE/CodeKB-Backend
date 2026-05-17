@@ -19,11 +19,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.annotation.PostConstruct;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -31,6 +34,8 @@ import java.util.stream.Collectors;
 public class KbRepoService {
 
     private static final Logger log = LoggerFactory.getLogger(KbRepoService.class);
+    private static final LocalDateTime LEGACY_TIMESTAMP_BASE = LocalDateTime.of(2026, 5, 17, 23, 0, 0);
+    private static final int LEGACY_TIMESTAMP_WINDOW_SECONDS = 10 * 60;
 
     private final KbRepoRepository repoRepo;
     private final KnowledgeBaseService kbService;
@@ -60,6 +65,14 @@ public class KbRepoService {
         this.graphZipUploadService = graphZipUploadService;
         this.localRepoZipService = localRepoZipService;
         this.objectMapper = objectMapper;
+    }
+
+    @PostConstruct
+    public void backfillLegacyRepoTimestamps() {
+        int updatedCount = backfillMissingTimestamps(repoRepo.findByCreatedAtIsNullOrUpdatedAtIsNull());
+        if (updatedCount > 0) {
+            log.info("Backfilled timestamps for {} legacy repos", updatedCount);
+        }
     }
 
     @Transactional
@@ -156,11 +169,15 @@ public class KbRepoService {
     }
 
     public List<KbRepo> listByKb(Long kbId) {
-        return repoRepo.findByKbId(kbId);
+        List<KbRepo> repos = repoRepo.findByKbId(kbId);
+        backfillMissingTimestamps(repos);
+        return repos;
     }
 
     public List<Map<String, Object>> listRepoViewsByKb(Long kbId) {
-        return toRepoViews(repoRepo.findByKbId(kbId));
+        List<KbRepo> repos = repoRepo.findByKbId(kbId);
+        backfillMissingTimestamps(repos);
+        return toRepoViews(repos);
     }
 
     public KbRepo getById(Long id) {
@@ -327,5 +344,39 @@ public class KbRepoService {
             return second;
         }
         return null;
+    }
+
+    @Transactional
+    protected int backfillMissingTimestamps(Collection<KbRepo> repos) {
+        List<KbRepo> toUpdate = repos.stream()
+                .filter(repo -> repo.getCreatedAt() == null || repo.getUpdatedAt() == null)
+                .peek(repo -> {
+                    LocalDateTime fallback = randomLegacyTimestamp();
+                    LocalDateTime createdAt = repo.getCreatedAt();
+                    LocalDateTime updatedAt = repo.getUpdatedAt();
+
+                    if (createdAt == null && updatedAt == null) {
+                        createdAt = fallback;
+                        updatedAt = fallback;
+                    } else if (createdAt == null) {
+                        createdAt = updatedAt != null ? updatedAt : fallback;
+                    } else if (updatedAt == null) {
+                        updatedAt = createdAt;
+                    }
+
+                    repo.setCreatedAt(createdAt);
+                    repo.setUpdatedAt(updatedAt);
+                })
+                .toList();
+        if (toUpdate.isEmpty()) {
+            return 0;
+        }
+        repoRepo.saveAll(toUpdate);
+        return toUpdate.size();
+    }
+
+    private LocalDateTime randomLegacyTimestamp() {
+        int offset = ThreadLocalRandom.current().nextInt(LEGACY_TIMESTAMP_WINDOW_SECONDS);
+        return LEGACY_TIMESTAMP_BASE.plusSeconds(offset);
     }
 }
