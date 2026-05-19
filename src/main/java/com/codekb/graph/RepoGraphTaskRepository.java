@@ -15,6 +15,7 @@ public interface RepoGraphTaskRepository extends JpaRepository<RepoGraphTask, Lo
     List<RepoGraphTask> findByRepoIdInOrderByRepoIdAscCreatedAtDesc(Collection<Long> repoIds);
 
     List<RepoGraphTask> findByRepoId(Long repoId);
+    List<RepoGraphTask> findByRepoIdOrderByCreatedAtDesc(Long repoId);
 
     @Modifying
     @Query("delete from RepoGraphTask t where t.repoId = :repoId")

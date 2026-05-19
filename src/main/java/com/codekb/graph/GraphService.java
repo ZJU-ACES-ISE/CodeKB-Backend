@@ -8,6 +8,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -48,21 +49,26 @@ public class GraphService {
         return saved;
     }
 
+    public List<RepoGraphTask> listTasksByRepo(Long repoId) {
+        repoService.getById(repoId);
+        return taskRepo.findByRepoIdOrderByCreatedAtDesc(repoId);
+    }
+
     public RepoGraphTask getLatestTask(Long repoId) {
         return taskRepo.findFirstByRepoIdOrderByCreatedAtDesc(repoId)
-                .orElseThrow(() -> new BusinessException(404, "该仓库暂无图任务"));
+                .orElseThrow(() -> new BusinessException(404, "\u8be5\u4ed3\u5e93\u6682\u65e0\u56fe\u4efb\u52a1"));
     }
 
     public RepoGraphTask getTask(Long taskId) {
         return taskRepo.findById(taskId)
-                .orElseThrow(() -> new BusinessException(404, "图任务不存在: " + taskId));
+                .orElseThrow(() -> new BusinessException(404, "\u56fe\u4efb\u52a1\u4e0d\u5b58\u5728: " + taskId));
     }
 
     @SuppressWarnings("unchecked")
     public Map<String, Object> getGraph(Long taskId) {
         RepoGraphTask task = getTask(taskId);
         if (task.getStatus() != GraphTaskStatus.READY) {
-            throw new BusinessException(409, "图任务尚未完成，当前状态: " + task.getStatus());
+            throw new BusinessException(409, "\u56fe\u4efb\u52a1\u5c1a\u672a\u5b8c\u6210\uff0c\u5f53\u524d\u72b6\u6001: " + task.getStatus());
         }
 
         if (task.getSnapshotUrl() != null) {
@@ -78,13 +84,13 @@ public class GraphService {
             return client.getGraph(task.getGraphJobId());
         }
 
-        throw new BusinessException(500, "无法获取图数据");
+        throw new BusinessException(500, "\u65e0\u6cd5\u83b7\u53d6\u56fe\u6570\u636e");
     }
 
     @SuppressWarnings("unchecked")
     public Map<String, Object> getLatestReadyGraph(Long repoId) {
         RepoGraphTask task = taskRepo.findFirstByRepoIdAndStatusOrderByCreatedAtDesc(repoId, GraphTaskStatus.READY)
-                .orElseThrow(() -> new BusinessException(404, "该仓库暂无就绪的关联图"));
+                .orElseThrow(() -> new BusinessException(404, "\u8be5\u4ed3\u5e93\u6682\u65e0\u5c31\u7eea\u7684\u5173\u8054\u56fe"));
         return getGraph(task.getId());
     }
 }

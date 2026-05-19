@@ -5,6 +5,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -18,6 +19,11 @@ public class GraphController {
     @PostMapping("/graph-jobs")
     public ApiResponse<RepoGraphTask> create(@RequestBody @Valid CreateTaskRequest req) {
         return ApiResponse.ok(graphService.createTask(req.repoId(), req.ref(), req.depth()));
+    }
+
+    @GetMapping("/graph-jobs")
+    public ApiResponse<List<RepoGraphTask>> listByRepo(@RequestParam Long repoId) {
+        return ApiResponse.ok(graphService.listTasksByRepo(repoId));
     }
 
     @GetMapping("/graph-jobs/{taskId}")
