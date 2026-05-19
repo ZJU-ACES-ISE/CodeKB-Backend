@@ -51,24 +51,29 @@ public class GraphTaskFlowService {
                 .collect(Collectors.toMap(RepoSummary::getRepoId, summary -> summary, (left, right) -> left, LinkedHashMap::new));
 
         List<RepoGraphTask> allTasks = graphTaskRepository.findByRepoIdInOrderByRepoIdAscCreatedAtDesc(repoIds);
-        Map<Long, RepoGraphTask> latestTasks = new HashMap<>();
+        Map<Long, List<RepoGraphTask>> tasksByRepo = new HashMap<>();
         Map<Long, Integer> taskCounts = new HashMap<>();
         for (RepoGraphTask task : allTasks) {
-            latestTasks.putIfAbsent(task.getRepoId(), task);
+            tasksByRepo.computeIfAbsent(task.getRepoId(), ignored -> new ArrayList<>())
+                    .add(task);
             taskCounts.merge(task.getRepoId(), 1, Integer::sum);
         }
 
         Map<Long, String> kbNames = kbNameMap(repos);
 
         repos.sort(Comparator
-                .comparing((KbRepo repo) -> latestActivityAt(repo, summariesByRepo.get(repo.getId()), latestTasks.get(repo.getId())),
+                .comparing((KbRepo repo) -> latestActivityAt(
+                                repo,
+                                summariesByRepo.get(repo.getId()),
+                                repoService.currentLatestGraphTask(repo, tasksByRepo.getOrDefault(repo.getId(), List.of()))),
                         Comparator.nullsLast(Comparator.reverseOrder()))
                 .thenComparing(KbRepo::getId, Comparator.reverseOrder()));
 
         List<Map<String, Object>> result = new ArrayList<>(repos.size());
         for (KbRepo repo : repos) {
             RepoSummary summary = summariesByRepo.get(repo.getId());
-            RepoGraphTask latestTask = latestTasks.get(repo.getId());
+            RepoGraphTask latestTask = repoService.currentLatestGraphTask(
+                    repo, tasksByRepo.getOrDefault(repo.getId(), List.of()));
             String repoStatus = repoService.normalizeRepoStatus(repo.getStatus(), summary != null);
             StageInfo stage = currentStage(repoStatus, summary, latestTask);
             LocalDateTime latestActivityAt = latestActivityAt(repo, summary, latestTask);
@@ -93,7 +98,8 @@ public class GraphTaskFlowService {
     public Map<String, Object> getFlow(Long repoId) {
         KbRepo repo = repoService.getById(repoId);
         RepoSummary summary = summaryRepository.findByRepoId(repoId).orElse(null);
-        RepoGraphTask latestTask = graphTaskRepository.findFirstByRepoIdOrderByCreatedAtDesc(repoId).orElse(null);
+        List<RepoGraphTask> tasks = graphTaskRepository.findByRepoIdOrderByCreatedAtDesc(repoId);
+        RepoGraphTask latestTask = repoService.currentLatestGraphTask(repo, tasks);
         String repoStatus = repoService.normalizeRepoStatus(repo.getStatus(), summary != null);
         StageInfo stage = currentStage(repoStatus, summary, latestTask);
 
@@ -104,7 +110,7 @@ public class GraphTaskFlowService {
         item.put("summaryCreatedAt", summary != null ? summary.getCreatedAt() : null);
         item.put("summaryUpdatedAt", summary != null ? summary.getUpdatedAt() : null);
         item.put("latestGraphTask", latestTask);
-        item.put("graphTaskCount", graphTaskRepository.findByRepoId(repoId).size());
+        item.put("graphTaskCount", tasks.size());
         item.put("latestActivityAt", latestActivityAt(repo, summary, latestTask));
         item.put("currentStage", stage.code());
         item.put("currentStageLabel", stage.label());

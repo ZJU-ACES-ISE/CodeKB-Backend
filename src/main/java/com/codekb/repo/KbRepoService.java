@@ -21,11 +21,13 @@ import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.annotation.PostConstruct;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -36,6 +38,12 @@ public class KbRepoService {
     private static final Logger log = LoggerFactory.getLogger(KbRepoService.class);
     private static final LocalDateTime LEGACY_TIMESTAMP_BASE = LocalDateTime.of(2026, 5, 17, 23, 0, 0);
     private static final int LEGACY_TIMESTAMP_WINDOW_SECONDS = 10 * 60;
+
+    public record ImportRepoResult(KbRepo repo, boolean duplicate) {
+        public String action() {
+            return duplicate ? "DUPLICATE" : "IMPORTED";
+        }
+    }
 
     private final KbRepoRepository repoRepo;
     private final KnowledgeBaseService kbService;
@@ -76,19 +84,24 @@ public class KbRepoService {
     }
 
     @Transactional
-    public KbRepo importRepo(Long kbId,
-                             String githubUrl,
-                             String providerHint,
-                             String repoName,
-                             String ref,
-                             Integer depth,
-                             Long userId) {
+    public ImportRepoResult importRepo(Long kbId,
+                                       String githubUrl,
+                                       String providerHint,
+                                       String repoName,
+                                       String ref,
+                                       Integer depth,
+                                       Long userId) {
         RepoUrlParts parts = RepoUrlParser.parse(githubUrl, providerHint);
         if (parts.provider() == RepoProvider.LOCAL) {
-            return importLocalDirectory(kbId, githubUrl, repoName, ref, userId);
+            return new ImportRepoResult(importLocalDirectory(kbId, githubUrl, repoName, ref, userId), false);
         }
 
         kbService.getById(kbId); // 404 guard
+
+        Optional<KbRepo> duplicate = findDuplicateRemoteRepo(parts, userId);
+        if (duplicate.isPresent()) {
+            return new ImportRepoResult(duplicate.get(), true);
+        }
 
         KbRepo entity = new KbRepo();
         entity.setKbId(kbId);
@@ -103,7 +116,7 @@ public class KbRepoService {
         KbRepo saved = repoRepo.save(entity);
         kbService.incrementRepoCount(kbId);
         eventPublisher.publishEvent(new RepoImportedEvent(this, saved.getId()));
-        return saved;
+        return new ImportRepoResult(saved, false);
     }
 
     /**
@@ -186,6 +199,14 @@ public class KbRepoService {
     }
 
     @Transactional
+    public KbRepo refreshRepo(Long repoId) {
+        KbRepo repo = getById(repoId);
+        summaryRepository.deleteByRepoId(repoId);
+        repo.setStatus("IMPORTED");
+        return repoRepo.save(repo);
+    }
+
+    @Transactional
     public void updateStatus(Long repoId, String status) {
         repoRepo.findById(repoId).ifPresent(r -> {
             r.setStatus(status);
@@ -248,7 +269,8 @@ public class KbRepoService {
 
     public Map<String, Object> toRepoView(KbRepo repo) {
         RepoSummary summary = summaryRepository.findByRepoId(repo.getId()).orElse(null);
-        RepoGraphTask latestGraphTask = graphTaskRepository.findFirstByRepoIdOrderByCreatedAtDesc(repo.getId()).orElse(null);
+        List<RepoGraphTask> tasks = graphTaskRepository.findByRepoIdOrderByCreatedAtDesc(repo.getId());
+        RepoGraphTask latestGraphTask = currentLatestGraphTask(repo, tasks);
         return toRepoView(repo, summary, latestGraphTask);
     }
 
@@ -290,13 +312,33 @@ public class KbRepoService {
         }
 
         List<Long> repoIds = repos.stream().map(KbRepo::getId).toList();
+        Map<Long, List<RepoGraphTask>> tasksByRepo = graphTasksByRepo(repoIds);
         Map<Long, RepoSummary> summariesByRepoId = summaryRepository.findByRepoIdIn(repoIds).stream()
                 .collect(Collectors.toMap(RepoSummary::getRepoId, Function.identity(), (a, b) -> a));
-        Map<Long, RepoGraphTask> latestGraphTasks = latestGraphTasks(repoIds);
 
         return repos.stream()
-                .map(repo -> toRepoView(repo, summariesByRepoId.get(repo.getId()), latestGraphTasks.get(repo.getId())))
+                .map(repo -> toRepoView(
+                        repo,
+                        summariesByRepoId.get(repo.getId()),
+                        currentLatestGraphTask(repo, tasksByRepo.getOrDefault(repo.getId(), List.of()))))
                 .toList();
+    }
+
+    public RepoGraphTask currentLatestGraphTask(KbRepo repo, List<RepoGraphTask> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return null;
+        }
+        LocalDateTime cutoff = repo.getUpdatedAt() != null ? repo.getUpdatedAt() : repo.getCreatedAt();
+        if (cutoff == null) {
+            return tasks.get(0);
+        }
+        for (RepoGraphTask task : tasks) {
+            LocalDateTime createdAt = task.getCreatedAt();
+            if (createdAt == null || !createdAt.isBefore(cutoff)) {
+                return task;
+            }
+        }
+        return null;
     }
 
     private String extractLocalPath(String githubUrl) {
@@ -317,12 +359,25 @@ public class KbRepoService {
         return fallbackName;
     }
 
-    private Map<Long, RepoGraphTask> latestGraphTasks(Collection<Long> repoIds) {
-        Map<Long, RepoGraphTask> latestTasks = new HashMap<>();
-        for (RepoGraphTask task : graphTaskRepository.findByRepoIdInOrderByRepoIdAscCreatedAtDesc(repoIds)) {
-            latestTasks.putIfAbsent(task.getRepoId(), task);
+    private Optional<KbRepo> findDuplicateRemoteRepo(RepoUrlParts parts, Long userId) {
+        if (userId == null || !parts.hasRemoteProject()) {
+            return Optional.empty();
         }
-        return latestTasks;
+        RepoProvider provider = parts.provider();
+        if (provider != RepoProvider.GITHUB && provider != RepoProvider.GITEE && provider != RepoProvider.GITLAB) {
+            return Optional.empty();
+        }
+        return repoRepo.findFirstByCreatedByAndProviderIgnoreCaseAndOwnerIgnoreCaseAndRepoIgnoreCaseOrderByIdAsc(
+                userId, provider.key(), parts.owner(), parts.repo());
+    }
+
+    private Map<Long, List<RepoGraphTask>> graphTasksByRepo(Collection<Long> repoIds) {
+        Map<Long, List<RepoGraphTask>> tasksByRepo = new HashMap<>();
+        for (RepoGraphTask task : graphTaskRepository.findByRepoIdInOrderByRepoIdAscCreatedAtDesc(repoIds)) {
+            tasksByRepo.computeIfAbsent(task.getRepoId(), ignored -> new ArrayList<>())
+                    .add(task);
+        }
+        return tasksByRepo;
     }
 
     private String frameworkLabel(RepoSummary summary) {

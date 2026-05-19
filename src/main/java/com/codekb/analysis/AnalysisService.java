@@ -77,6 +77,11 @@ public class AnalysisService {
     }
 
     @Async("codekbAsyncExecutor")
+    public void rebuild(Long repoId) {
+        analyze(repoId, true);
+    }
+
+    @Async("codekbAsyncExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void handleRepoImported(RepoImportedEvent event) {
         analyze(event.getRepoId(), true);
