@@ -24,6 +24,7 @@ public class KnowledgeBaseController {
 
     @GetMapping
     public ApiResponse<List<KnowledgeBase>> list(@AuthenticationPrincipal CodeKbPrincipal principal) {
+        kbService.ensureDefaultKnowledgeBase(principal.userId());
         return ApiResponse.ok(kbService.listByOwner(principal.userId()));
     }
 
@@ -34,8 +35,9 @@ public class KnowledgeBaseController {
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<KnowledgeBase> get(@PathVariable Long id) {
-        return ApiResponse.ok(kbService.getById(id));
+    public ApiResponse<KnowledgeBase> get(@AuthenticationPrincipal CodeKbPrincipal principal,
+                                          @PathVariable Long id) {
+        return ApiResponse.ok(kbService.getOwnedById(principal.userId(), id));
     }
 
     @PutMapping("/{id}")
@@ -46,9 +48,10 @@ public class KnowledgeBaseController {
     }
 
     @GetMapping("/{id}/repos")
-    public ApiResponse<?> listRepos(@PathVariable Long id) {
-        kbService.getById(id); // 404 guard
-        return ApiResponse.ok(repoService.listRepoViewsByKb(id));
+    public ApiResponse<?> listRepos(@AuthenticationPrincipal CodeKbPrincipal principal,
+                                    @PathVariable Long id) {
+        kbService.getOwnedById(principal.userId(), id);
+        return ApiResponse.ok(repoService.listRepoViewsByOwnedKb(principal.userId(), id));
     }
 
     record CreateRequest(@NotBlank String name, String description) {}

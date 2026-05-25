@@ -96,7 +96,7 @@ public class KbRepoService {
             return new ImportRepoResult(importLocalDirectory(kbId, githubUrl, repoName, ref, userId), false);
         }
 
-        kbService.getById(kbId); // 404 guard
+        kbService.getOwnedById(userId, kbId);
 
         Optional<KbRepo> duplicate = findDuplicateRemoteRepo(parts, userId);
         if (duplicate.isPresent()) {
@@ -124,7 +124,7 @@ public class KbRepoService {
      */
     @Transactional
     public KbRepo importZip(Long kbId, MultipartFile file, String repoNameOpt, Long userId) throws java.io.IOException {
-        kbService.getById(kbId);
+        kbService.getOwnedById(userId, kbId);
         if (file == null || file.isEmpty()) {
             throw new BusinessException(400, "请上传 ZIP 文件");
         }
@@ -163,7 +163,7 @@ public class KbRepoService {
      */
     @Transactional
     public KbRepo importLocalDirectory(Long kbId, String githubUrl, String repoName, String ref, Long userId) {
-        kbService.getById(kbId);
+        kbService.getOwnedById(userId, kbId);
         String localPath = extractLocalPath(githubUrl);
         LocalRepoZipService.LocalRepoDescriptor descriptor = localRepoZipService.describe(localPath, repoName);
 
@@ -193,14 +193,25 @@ public class KbRepoService {
         return toRepoViews(repos);
     }
 
+    public List<Map<String, Object>> listRepoViewsByOwnedKb(Long userId, Long kbId) {
+        kbService.getOwnedById(userId, kbId);
+        return listRepoViewsByKb(kbId);
+    }
+
     public KbRepo getById(Long id) {
         return repoRepo.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "仓库不存在: " + id));
     }
 
-    @Transactional
-    public KbRepo refreshRepo(Long repoId) {
+    public KbRepo getOwnedById(Long userId, Long repoId) {
         KbRepo repo = getById(repoId);
+        kbService.getOwnedById(userId, repo.getKbId());
+        return repo;
+    }
+
+    @Transactional
+    public KbRepo refreshRepo(Long userId, Long repoId) {
+        KbRepo repo = getOwnedById(userId, repoId);
         summaryRepository.deleteByRepoId(repoId);
         repo.setStatus("IMPORTED");
         return repoRepo.save(repo);
@@ -239,8 +250,8 @@ public class KbRepoService {
      * OSS 删除是 best-effort，失败不会回滚。
      */
     @Transactional
-    public void deleteRepo(Long repoId) {
-        KbRepo repo = getById(repoId);
+    public void deleteRepo(Long userId, Long repoId) {
+        KbRepo repo = getOwnedById(userId, repoId);
         Long kbId = repo.getKbId();
 
         // 1) 先把所有图任务捞出来，记下 snapshot key，待事务结束后异步清理 OSS
@@ -265,6 +276,18 @@ public class KbRepoService {
             }
         }
         log.info("Deleted repo {} (kbId={}), cascaded {} graph tasks", repoId, kbId, tasks.size());
+    }
+
+    public List<KbRepo> listOwnedRepos(Long userId) {
+        List<Long> kbIds = kbService.listByOwner(userId).stream()
+                .map(kb -> kb.getId())
+                .toList();
+        if (kbIds.isEmpty()) {
+            return List.of();
+        }
+        List<KbRepo> repos = repoRepo.findByKbIdIn(kbIds);
+        backfillMissingTimestamps(repos);
+        return repos;
     }
 
     public Map<String, Object> toRepoView(KbRepo repo) {

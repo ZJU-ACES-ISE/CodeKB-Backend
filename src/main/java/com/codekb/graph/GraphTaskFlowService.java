@@ -5,7 +5,6 @@ import com.codekb.analysis.RepoSummaryRepository;
 import com.codekb.knowledge.KnowledgeBase;
 import com.codekb.knowledge.KnowledgeBaseRepository;
 import com.codekb.repo.KbRepo;
-import com.codekb.repo.KbRepoRepository;
 import com.codekb.repo.KbRepoService;
 import org.springframework.stereotype.Service;
 
@@ -22,26 +21,23 @@ import java.util.stream.Collectors;
 @Service
 public class GraphTaskFlowService {
 
-    private final KbRepoRepository repoRepository;
     private final RepoSummaryRepository summaryRepository;
     private final RepoGraphTaskRepository graphTaskRepository;
     private final KnowledgeBaseRepository kbRepository;
     private final KbRepoService repoService;
 
-    public GraphTaskFlowService(KbRepoRepository repoRepository,
-                                RepoSummaryRepository summaryRepository,
+    public GraphTaskFlowService(RepoSummaryRepository summaryRepository,
                                 RepoGraphTaskRepository graphTaskRepository,
                                 KnowledgeBaseRepository kbRepository,
                                 KbRepoService repoService) {
-        this.repoRepository = repoRepository;
         this.summaryRepository = summaryRepository;
         this.graphTaskRepository = graphTaskRepository;
         this.kbRepository = kbRepository;
         this.repoService = repoService;
     }
 
-    public List<Map<String, Object>> listFlows() {
-        List<KbRepo> repos = new ArrayList<>(repoRepository.findAll());
+    public List<Map<String, Object>> listFlows(Long userId) {
+        List<KbRepo> repos = new ArrayList<>(repoService.listOwnedRepos(userId));
         if (repos.isEmpty()) {
             return List.of();
         }
@@ -95,8 +91,8 @@ public class GraphTaskFlowService {
         return result;
     }
 
-    public Map<String, Object> getFlow(Long repoId) {
-        KbRepo repo = repoService.getById(repoId);
+    public Map<String, Object> getFlow(Long userId, Long repoId) {
+        KbRepo repo = repoService.getOwnedById(userId, repoId);
         RepoSummary summary = summaryRepository.findByRepoId(repoId).orElse(null);
         List<RepoGraphTask> tasks = graphTaskRepository.findByRepoIdOrderByCreatedAtDesc(repoId);
         RepoGraphTask latestTask = repoService.currentLatestGraphTask(repo, tasks);

@@ -3,16 +3,17 @@ package com.codekb.search;
 import com.codekb.analysis.FrameworkInference;
 import com.codekb.analysis.RepoSummary;
 import com.codekb.analysis.RepoSummaryRepository;
+import com.codekb.auth.CodeKbPrincipal;
 import com.codekb.common.ApiResponse;
 import com.codekb.graph.RepoGraphTask;
 import com.codekb.graph.RepoGraphTaskRepository;
 import com.codekb.knowledge.KnowledgeBase;
-import com.codekb.knowledge.KnowledgeBaseRepository;
+import com.codekb.knowledge.KnowledgeBaseService;
 import com.codekb.repo.KbRepo;
-import com.codekb.repo.KbRepoRepository;
 import com.codekb.repo.KbRepoService;
 import com.codekb.repo.RepoUrlParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -34,22 +35,19 @@ import java.util.stream.Collectors;
 @RequestMapping("/search")
 public class SearchController {
 
-    private final KbRepoRepository repoRepository;
     private final RepoSummaryRepository summaryRepository;
-    private final KnowledgeBaseRepository kbRepository;
+    private final KnowledgeBaseService kbService;
     private final RepoGraphTaskRepository graphTaskRepository;
     private final KbRepoService repoService;
     private final ObjectMapper objectMapper;
 
-    public SearchController(KbRepoRepository repoRepository,
-                            RepoSummaryRepository summaryRepository,
-                            KnowledgeBaseRepository kbRepository,
+    public SearchController(RepoSummaryRepository summaryRepository,
+                            KnowledgeBaseService kbService,
                             RepoGraphTaskRepository graphTaskRepository,
                             KbRepoService repoService,
                             ObjectMapper objectMapper) {
-        this.repoRepository = repoRepository;
         this.summaryRepository = summaryRepository;
-        this.kbRepository = kbRepository;
+        this.kbService = kbService;
         this.graphTaskRepository = graphTaskRepository;
         this.repoService = repoService;
         this.objectMapper = objectMapper;
@@ -57,13 +55,14 @@ public class SearchController {
 
     @GetMapping("/code")
     public ApiResponse<List<Map<String, Object>>> searchCode(
+            @AuthenticationPrincipal CodeKbPrincipal principal,
             @RequestParam String q,
             @RequestParam(defaultValue = "20") int limit) {
         if (q == null || q.trim().isEmpty()) return ApiResponse.ok(Collections.emptyList());
         String kw = q.trim().toLowerCase();
         List<Map<String, Object>> results = new ArrayList<>();
 
-        List<KbRepo> repos = repoRepository.findAll();
+        List<KbRepo> repos = repoService.listOwnedRepos(principal.userId());
         for (KbRepo repo : repos) {
             Optional<RepoSummary> sumOpt = summaryRepository.findByRepoId(repo.getId());
             double score = scoreRepo(repo, sumOpt.orElse(null), kw);
@@ -97,10 +96,13 @@ public class SearchController {
     }
 
     @GetMapping("/stats")
-    public ApiResponse<Map<String, Object>> stats() {
-        List<KnowledgeBase> kbs = kbRepository.findAll();
-        List<KbRepo> repos = repoRepository.findAll();
-        List<RepoSummary> summaries = summaryRepository.findAll();
+    public ApiResponse<Map<String, Object>> stats(@AuthenticationPrincipal CodeKbPrincipal principal) {
+        kbService.ensureDefaultKnowledgeBase(principal.userId());
+        List<KnowledgeBase> kbs = kbService.listByOwner(principal.userId());
+        List<KbRepo> repos = repoService.listOwnedRepos(principal.userId());
+        List<RepoSummary> summaries = repos.isEmpty()
+                ? List.of()
+                : summaryRepository.findByRepoIdIn(repos.stream().map(KbRepo::getId).toList());
         Map<Long, KbRepo> repoById = repos.stream()
                 .collect(Collectors.toMap(KbRepo::getId, repo -> repo, (left, right) -> left, LinkedHashMap::new));
 

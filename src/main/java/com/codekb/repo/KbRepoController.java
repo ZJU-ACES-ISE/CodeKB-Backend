@@ -60,15 +60,17 @@ public class KbRepoController {
 
     @PostMapping("/{id}/refresh")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public ApiResponse<Map<String, Object>> refresh(@PathVariable Long id) {
-        KbRepo refreshed = repoService.refreshRepo(id);
+    public ApiResponse<Map<String, Object>> refresh(@AuthenticationPrincipal CodeKbPrincipal principal,
+                                                    @PathVariable Long id) {
+        KbRepo refreshed = repoService.refreshRepo(principal.userId(), id);
         analysisService.rebuild(id);
         return ApiResponse.ok(buildImportResponse(refreshed, "UPDATED"));
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<Map<String, Object>> get(@PathVariable Long id) {
-        KbRepo repo = repoService.getById(id);
+    public ApiResponse<Map<String, Object>> get(@AuthenticationPrincipal CodeKbPrincipal principal,
+                                                @PathVariable Long id) {
+        KbRepo repo = repoService.getOwnedById(principal.userId(), id);
         var summary = summaryRepository.findByRepoId(id).orElse(null);
         var tasks = graphTaskRepository.findByRepoIdOrderByCreatedAtDesc(id);
         var latestGraphTask = repoService.currentLatestGraphTask(repo, tasks);
@@ -80,8 +82,9 @@ public class KbRepoController {
     }
 
     @DeleteMapping("/{id}")
-    public ApiResponse<Void> delete(@PathVariable Long id) {
-        repoService.deleteRepo(id);
+    public ApiResponse<Void> delete(@AuthenticationPrincipal CodeKbPrincipal principal,
+                                    @PathVariable Long id) {
+        repoService.deleteRepo(principal.userId(), id);
         return ApiResponse.ok();
     }
 

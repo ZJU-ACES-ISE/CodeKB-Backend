@@ -36,8 +36,8 @@ public class GraphService {
     }
 
     @Transactional
-    public RepoGraphTask createTask(Long repoId, String ref, Integer depth) {
-        var repo = repoService.getById(repoId);
+    public RepoGraphTask createTask(Long userId, Long repoId, String ref, Integer depth) {
+        var repo = repoService.getOwnedById(userId, repoId);
         RepoGraphTask task = new RepoGraphTask();
         task.setRepoId(repoId);
         task.setGithubUrl(repo.getGithubUrl());
@@ -49,24 +49,27 @@ public class GraphService {
         return saved;
     }
 
-    public List<RepoGraphTask> listTasksByRepo(Long repoId) {
-        repoService.getById(repoId);
+    public List<RepoGraphTask> listTasksByRepo(Long userId, Long repoId) {
+        repoService.getOwnedById(userId, repoId);
         return taskRepo.findByRepoIdOrderByCreatedAtDesc(repoId);
     }
 
-    public RepoGraphTask getLatestTask(Long repoId) {
+    public RepoGraphTask getLatestTask(Long userId, Long repoId) {
+        repoService.getOwnedById(userId, repoId);
         return taskRepo.findFirstByRepoIdOrderByCreatedAtDesc(repoId)
                 .orElseThrow(() -> new BusinessException(404, "\u8be5\u4ed3\u5e93\u6682\u65e0\u56fe\u4efb\u52a1"));
     }
 
-    public RepoGraphTask getTask(Long taskId) {
-        return taskRepo.findById(taskId)
+    public RepoGraphTask getTask(Long userId, Long taskId) {
+        RepoGraphTask task = taskRepo.findById(taskId)
                 .orElseThrow(() -> new BusinessException(404, "\u56fe\u4efb\u52a1\u4e0d\u5b58\u5728: " + taskId));
+        repoService.getOwnedById(userId, task.getRepoId());
+        return task;
     }
 
     @SuppressWarnings("unchecked")
-    public Map<String, Object> getGraph(Long taskId) {
-        RepoGraphTask task = getTask(taskId);
+    public Map<String, Object> getGraph(Long userId, Long taskId) {
+        RepoGraphTask task = getTask(userId, taskId);
         if (task.getStatus() != GraphTaskStatus.READY) {
             throw new BusinessException(409, "\u56fe\u4efb\u52a1\u5c1a\u672a\u5b8c\u6210\uff0c\u5f53\u524d\u72b6\u6001: " + task.getStatus());
         }
@@ -88,9 +91,10 @@ public class GraphService {
     }
 
     @SuppressWarnings("unchecked")
-    public Map<String, Object> getLatestReadyGraph(Long repoId) {
+    public Map<String, Object> getLatestReadyGraph(Long userId, Long repoId) {
+        repoService.getOwnedById(userId, repoId);
         RepoGraphTask task = taskRepo.findFirstByRepoIdAndStatusOrderByCreatedAtDesc(repoId, GraphTaskStatus.READY)
                 .orElseThrow(() -> new BusinessException(404, "\u8be5\u4ed3\u5e93\u6682\u65e0\u5c31\u7eea\u7684\u5173\u8054\u56fe"));
-        return getGraph(task.getId());
+        return getGraph(userId, task.getId());
     }
 }
