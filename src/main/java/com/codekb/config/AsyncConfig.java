@@ -14,12 +14,24 @@ public class AsyncConfig {
 
     @Bean(name = "codekbAsyncExecutor")
     public Executor codekbAsyncExecutor() {
+        return buildExecutor(8, 16, 500, "codekb-analysis-");
+    }
+
+    @Bean(name = "codekbGraphExecutor")
+    public Executor codekbGraphExecutor() {
+        return buildExecutor(4, 8, 200, "codekb-graph-");
+    }
+
+    private Executor buildExecutor(int corePoolSize,
+                                   int maxPoolSize,
+                                   int queueCapacity,
+                                   String threadNamePrefix) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(8);
-        executor.setMaxPoolSize(16);
-        executor.setQueueCapacity(500);
+        executor.setCorePoolSize(corePoolSize);
+        executor.setMaxPoolSize(maxPoolSize);
+        executor.setQueueCapacity(queueCapacity);
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        executor.setThreadNamePrefix("codekb-async-");
+        executor.setThreadNamePrefix(threadNamePrefix);
         executor.initialize();
         return executor;
     }

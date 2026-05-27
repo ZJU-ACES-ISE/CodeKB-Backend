@@ -26,7 +26,7 @@ public class GraphZipUploadService {
         this.repoService = repoService;
     }
 
-    @Async
+    @Async("codekbGraphExecutor")
     public void submit(Long repoId, byte[] zipBytes, String originalFilename, String repoNameOverride) {
         RepoGraphTask task = new RepoGraphTask();
         try {

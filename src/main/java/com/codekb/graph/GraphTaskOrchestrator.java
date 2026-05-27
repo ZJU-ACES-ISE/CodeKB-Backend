@@ -51,7 +51,7 @@ public class GraphTaskOrchestrator {
         this.localRepoZipService = localRepoZipService;
     }
 
-    @Async
+    @Async("codekbGraphExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void handle(GraphJobRequestedEvent event) {
         Long repoId = event.getRepoId();
