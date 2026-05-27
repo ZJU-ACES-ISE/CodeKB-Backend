@@ -47,6 +47,12 @@ public class RepoGraphTask {
     @Column(name = "submitted_at")
     private LocalDateTime submittedAt;
 
+    @Column(name = "lease_expires_at")
+    private LocalDateTime leaseExpiresAt;
+
+    @Column(name = "next_poll_at")
+    private LocalDateTime nextPollAt;
+
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 
@@ -55,6 +61,10 @@ public class RepoGraphTask {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     @PrePersist
     void prePersist() { createdAt = updatedAt = LocalDateTime.now(); }
@@ -87,8 +97,13 @@ public class RepoGraphTask {
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
     public LocalDateTime getSubmittedAt() { return submittedAt; }
     public void setSubmittedAt(LocalDateTime submittedAt) { this.submittedAt = submittedAt; }
+    public LocalDateTime getLeaseExpiresAt() { return leaseExpiresAt; }
+    public void setLeaseExpiresAt(LocalDateTime leaseExpiresAt) { this.leaseExpiresAt = leaseExpiresAt; }
+    public LocalDateTime getNextPollAt() { return nextPollAt; }
+    public void setNextPollAt(LocalDateTime nextPollAt) { this.nextPollAt = nextPollAt; }
     public LocalDateTime getCompletedAt() { return completedAt; }
     public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public long getVersion() { return version; }
 }

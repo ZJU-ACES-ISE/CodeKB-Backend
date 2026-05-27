@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -23,7 +24,11 @@ public class GraphServiceClient {
 
     public GraphServiceClient(GraphServiceProperties props, ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(props.getRequestTimeoutMs());
+        requestFactory.setReadTimeout(props.getRequestTimeoutMs());
         this.restClient = RestClient.builder()
+                .requestFactory(requestFactory)
                 .baseUrl(props.getBaseUrl())
                 .build();
     }

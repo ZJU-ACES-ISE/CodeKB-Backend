@@ -47,15 +47,18 @@ public class GraphZipUploadService {
             task.setGraphJobId(jobId);
             task.setStatus(GraphTaskStatus.SUBMITTED);
             task.setSubmittedAt(LocalDateTime.now());
+            task.setLeaseExpiresAt(LocalDateTime.now().minusSeconds(1));
+            task.setNextPollAt(LocalDateTime.now());
             task = orchestrator.save(task);
             log.info("ZIP graph job submitted: jobId={} taskId={}", jobId, task.getId());
-
-            orchestrator.pollJobToCompletion(task, repoId, jobId);
+            orchestrator.dispatchTask(task.getId(), "zip-upload");
         } catch (Exception e) {
             log.error("ZIP graph upload failed repoId={}: {}", repoId, e.getMessage(), e);
             if (task.getId() != null) {
                 task.setStatus(GraphTaskStatus.FAILED);
                 task.setErrorMessage(e.getMessage());
+                task.setLeaseExpiresAt(null);
+                task.setNextPollAt(null);
                 orchestrator.save(task);
             }
         }
