@@ -38,14 +38,27 @@ public class GraphController {
 
     @GetMapping("/graph-jobs/{taskId}/graph")
     public ApiResponse<Map<String, Object>> getGraph(@AuthenticationPrincipal CodeKbPrincipal principal,
-                                                     @PathVariable Long taskId) {
-        return ApiResponse.ok(graphService.getGraph(principal.userId(), taskId));
+                                                     @PathVariable Long taskId,
+                                                     @RequestParam(defaultValue = "false") boolean compact,
+                                                     @RequestParam(required = false) Integer nodeLimit,
+                                                     @RequestParam(required = false) Integer edgeLimit) {
+        return ApiResponse.ok(graphService.getGraph(principal.userId(), taskId, compact, nodeLimit, edgeLimit));
+    }
+
+    @GetMapping("/graph-jobs/{taskId}/node-detail")
+    public ApiResponse<Map<String, Object>> getGraphNode(@AuthenticationPrincipal CodeKbPrincipal principal,
+                                                         @PathVariable Long taskId,
+                                                         @RequestParam String nodeId) {
+        return ApiResponse.ok(graphService.getGraphNode(principal.userId(), taskId, nodeId));
     }
 
     @GetMapping("/graph/repos/{repoId}/latest")
     public ApiResponse<Map<String, Object>> getLatest(@AuthenticationPrincipal CodeKbPrincipal principal,
-                                                      @PathVariable Long repoId) {
-        return ApiResponse.ok(graphService.getLatestReadyGraph(principal.userId(), repoId));
+                                                      @PathVariable Long repoId,
+                                                      @RequestParam(defaultValue = "false") boolean compact,
+                                                      @RequestParam(required = false) Integer nodeLimit,
+                                                      @RequestParam(required = false) Integer edgeLimit) {
+        return ApiResponse.ok(graphService.getLatestReadyGraph(principal.userId(), repoId, compact, nodeLimit, edgeLimit));
     }
 
     /** 查询最新图任务的元数据（不限定 READY，供前端展示当前状态） */

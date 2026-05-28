@@ -21,6 +21,64 @@ public interface RepoGraphTaskRepository extends JpaRepository<RepoGraphTask, Lo
     List<RepoGraphTask> findByRepoId(Long repoId);
     List<RepoGraphTask> findByRepoIdOrderByCreatedAtDesc(Long repoId);
 
+    Optional<RepoGraphTask> findFirstByRepoIdAndGithubUrlAndRefAndDepthAndStatusInOrderByCreatedAtDesc(
+            Long repoId,
+            String githubUrl,
+            String ref,
+            int depth,
+            Collection<GraphTaskStatus> statuses);
+
+    @Query("""
+            select count(t) from RepoGraphTask t
+             where t.status in :statuses
+               and t.graphJobId is not null
+               and t.graphJobId <> ''
+            """)
+    long countByStatusInAndGraphJobIdPresent(@Param("statuses") Collection<GraphTaskStatus> statuses);
+
+    @Query("""
+            select count(t) from RepoGraphTask t
+             where t.status = :status
+               and t.graphJobId is not null
+               and t.graphJobId <> ''
+            """)
+    long countByStatusAndGraphJobIdPresent(@Param("status") GraphTaskStatus status);
+
+    @Query("""
+            select t from RepoGraphTask t
+             where t.status in :statuses
+               and t.graphJobId is not null
+               and t.graphJobId <> ''
+               and (t.nextPollAt is null or t.nextPollAt <= :now)
+               and (
+                    t.leaseExpiresAt is null
+                    or t.leaseExpiresAt <= :now
+                    or (t.updatedAt is not null and t.updatedAt <= :staleBefore)
+               )
+             order by t.nextPollAt asc, t.updatedAt asc
+            """)
+    List<RepoGraphTask> findDispatchableRemoteTasks(@Param("statuses") Collection<GraphTaskStatus> statuses,
+                                                    @Param("now") LocalDateTime now,
+                                                    @Param("staleBefore") LocalDateTime staleBefore,
+                                                    Pageable pageable);
+
+    @Query("""
+            select t from RepoGraphTask t
+             where t.status = :pendingStatus
+               and (t.graphJobId is null or t.graphJobId = '')
+               and (t.nextPollAt is null or t.nextPollAt <= :now)
+               and (
+                    t.leaseExpiresAt is null
+                    or t.leaseExpiresAt <= :now
+                    or (t.updatedAt is not null and t.updatedAt <= :staleBefore)
+               )
+             order by t.createdAt asc
+            """)
+    List<RepoGraphTask> findDispatchablePendingTasks(@Param("pendingStatus") GraphTaskStatus pendingStatus,
+                                                     @Param("now") LocalDateTime now,
+                                                     @Param("staleBefore") LocalDateTime staleBefore,
+                                                     Pageable pageable);
+
     @Query("""
             select t from RepoGraphTask t
              where t.status in :statuses

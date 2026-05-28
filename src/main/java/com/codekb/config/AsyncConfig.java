@@ -21,7 +21,7 @@ public class AsyncConfig {
 
     @Bean(name = "codekbGraphExecutor")
     public Executor codekbGraphExecutor() {
-        return buildExecutor(4, 8, 200, "codekb-graph-");
+        return buildExecutor(2, 2, 200, "codekb-graph-");
     }
 
     private Executor buildExecutor(int corePoolSize,

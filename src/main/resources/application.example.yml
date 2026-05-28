@@ -56,9 +56,21 @@ codekb:
     url-prefix: ${CODEKB_OSS_URL_PREFIX:}
   graph:
     base-url: ${CODEKB_GRAPH_BASE_URL:http://127.0.0.1:6401}
-    poll-interval-ms: 1500
+    poll-interval-ms: 10000
     max-poll-times: 200
     request-timeout-ms: 10000
+    worker-lease-ms: 600000
+    recovery-interval-ms: 1500
+    stale-task-threshold-ms: 600000
+    max-task-runtime-ms: 300000
+    recovery-batch-size: 8
+    remote-max-concurrent-jobs: 2
+    remote-slow-concurrent-jobs: 0
+    pending-retry-delay-ms: 3000
+    remote-error-backoff-ms: 30000
+    submission-cooldown-ms: 30000
+    slow-queue-threshold-ms: 60000
+    slow-poll-interval-ms: 120000
   # Preferred env var: CODEKB_GITHUB_TOKEN
   # Compatible fallbacks: GITHUB_TOKEN, GH_TOKEN
   github:

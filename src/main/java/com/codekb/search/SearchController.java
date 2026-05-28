@@ -151,7 +151,7 @@ public class SearchController {
                 continue;
             }
 
-            String graphStatus = latestTask.getStatus().name();
+            String graphStatus = latestTask.getDisplayStatus().name();
             graphTaskDist.merge(graphStatus, 1L, Long::sum);
 
             if (latestTask.getStatus() == com.codekb.graph.GraphTaskStatus.READY) {

@@ -139,12 +139,12 @@ public class GraphTaskFlowService {
 
     private StageInfo currentStage(String repoStatus, RepoSummary summary, RepoGraphTask latestTask) {
         if (latestTask != null && latestTask.getStatus() != null) {
-            return switch (latestTask.getStatus()) {
+            return switch (latestTask.getDisplayStatus()) {
                 case READY -> new StageInfo("GRAPH_READY", "\u5173\u8054\u56fe\u5df2\u5b8c\u6210", latestTask.getErrorMessage());
                 case FAILED -> new StageInfo("GRAPH_FAILED", "\u5173\u8054\u56fe\u5931\u8d25", latestTask.getErrorMessage());
                 case BUILDING -> new StageInfo("GRAPH_BUILDING", "\u5173\u8054\u56fe\u6784\u5efa\u4e2d", latestTask.getErrorMessage());
-                case SUBMITTED -> new StageInfo("GRAPH_SUBMITTED", "\u56fe\u4efb\u52a1\u5df2\u63d0\u4ea4", latestTask.getErrorMessage());
                 case PENDING -> new StageInfo("GRAPH_PENDING", "\u56fe\u4efb\u52a1\u6392\u961f\u4e2d", latestTask.getErrorMessage());
+                case SUBMITTED, SLOW_BUILDING -> new StageInfo("GRAPH_BUILDING", "\u5173\u8054\u56fe\u6784\u5efa\u4e2d", latestTask.getErrorMessage());
             };
         }
 

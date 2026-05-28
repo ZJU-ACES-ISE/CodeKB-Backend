@@ -8,14 +8,21 @@ import org.springframework.stereotype.Component;
 public class GraphServiceProperties {
 
     private String baseUrl = "http://localhost:8000";
-    private long pollIntervalMs = 1500L;
+    private long pollIntervalMs = 10000L;
     private int maxPollTimes = 200;
     private int requestTimeoutMs = 10000;
     private long workerLeaseMs = 10 * 60 * 1000L;
     private long recoveryIntervalMs = 1500L;
     private long staleTaskThresholdMs = 10 * 60 * 1000L;
-    private long maxTaskRuntimeMs = 0L;
+    private long maxTaskRuntimeMs = 5 * 60 * 1000L;
     private int recoveryBatchSize = 8;
+    private int remoteMaxConcurrentJobs = 3;
+    private int remoteSlowConcurrentJobs = 0;
+    private long pendingRetryDelayMs = 3000L;
+    private long remoteErrorBackoffMs = 30000L;
+    private long submissionCooldownMs = 30000L;
+    private long slowQueueThresholdMs = 60000L;
+    private long slowPollIntervalMs = 120000L;
 
     public String getBaseUrl() {
         return baseUrl;
@@ -87,5 +94,61 @@ public class GraphServiceProperties {
 
     public void setRecoveryBatchSize(int recoveryBatchSize) {
         this.recoveryBatchSize = recoveryBatchSize;
+    }
+
+    public int getRemoteMaxConcurrentJobs() {
+        return remoteMaxConcurrentJobs;
+    }
+
+    public void setRemoteMaxConcurrentJobs(int remoteMaxConcurrentJobs) {
+        this.remoteMaxConcurrentJobs = remoteMaxConcurrentJobs;
+    }
+
+    public int getRemoteSlowConcurrentJobs() {
+        return remoteSlowConcurrentJobs;
+    }
+
+    public void setRemoteSlowConcurrentJobs(int remoteSlowConcurrentJobs) {
+        this.remoteSlowConcurrentJobs = remoteSlowConcurrentJobs;
+    }
+
+    public long getPendingRetryDelayMs() {
+        return pendingRetryDelayMs;
+    }
+
+    public void setPendingRetryDelayMs(long pendingRetryDelayMs) {
+        this.pendingRetryDelayMs = pendingRetryDelayMs;
+    }
+
+    public long getRemoteErrorBackoffMs() {
+        return remoteErrorBackoffMs;
+    }
+
+    public void setRemoteErrorBackoffMs(long remoteErrorBackoffMs) {
+        this.remoteErrorBackoffMs = remoteErrorBackoffMs;
+    }
+
+    public long getSubmissionCooldownMs() {
+        return submissionCooldownMs;
+    }
+
+    public void setSubmissionCooldownMs(long submissionCooldownMs) {
+        this.submissionCooldownMs = submissionCooldownMs;
+    }
+
+    public long getSlowQueueThresholdMs() {
+        return slowQueueThresholdMs;
+    }
+
+    public void setSlowQueueThresholdMs(long slowQueueThresholdMs) {
+        this.slowQueueThresholdMs = slowQueueThresholdMs;
+    }
+
+    public long getSlowPollIntervalMs() {
+        return slowPollIntervalMs;
+    }
+
+    public void setSlowPollIntervalMs(long slowPollIntervalMs) {
+        this.slowPollIntervalMs = slowPollIntervalMs;
     }
 }

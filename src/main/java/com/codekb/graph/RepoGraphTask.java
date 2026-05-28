@@ -85,6 +85,12 @@ public class RepoGraphTask {
     public void setDepth(int depth) { this.depth = depth; }
     public GraphTaskStatus getStatus() { return status; }
     public void setStatus(GraphTaskStatus status) { this.status = status; }
+    public GraphTaskStatus getDisplayStatus() {
+        if (status == GraphTaskStatus.SUBMITTED || status == GraphTaskStatus.BUILDING || status == GraphTaskStatus.SLOW_BUILDING) {
+            return GraphTaskStatus.BUILDING;
+        }
+        return status;
+    }
     public String getExternalStatusRaw() { return externalStatusRaw; }
     public void setExternalStatusRaw(String externalStatusRaw) { this.externalStatusRaw = externalStatusRaw; }
     public Integer getNodeCount() { return nodeCount; }
