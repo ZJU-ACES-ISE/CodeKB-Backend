@@ -1,10 +1,13 @@
 package com.codekb.graph;
 
+import com.codekb.event.ZipGraphUploadRequestedEvent;
 import com.codekb.repo.KbRepoService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -37,6 +40,11 @@ public class GraphZipUploadService {
     }
 
     @Async("codekbGraphExecutor")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void handleZipUpload(ZipGraphUploadRequestedEvent event) {
+        submit(event.getRepoId(), event.getZipBytes(), event.getOriginalFilename(), event.getRepoNameOverride());
+    }
+
     public void submit(Long repoId, byte[] zipBytes, String originalFilename, String repoNameOverride) {
         RepoGraphTask task = new RepoGraphTask();
         try {

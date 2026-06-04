@@ -5,6 +5,7 @@ import com.codekb.analysis.RepoSummary;
 import com.codekb.analysis.RepoSummaryRepository;
 import com.codekb.common.BusinessException;
 import com.codekb.event.RepoImportedEvent;
+import com.codekb.event.ZipGraphUploadRequestedEvent;
 import com.codekb.graph.GraphZipUploadService;
 import com.codekb.graph.OssService;
 import com.codekb.graph.RepoGraphTask;
@@ -154,7 +155,7 @@ public class KbRepoService {
         KbRepo saved = repoRepo.save(entity);
         kbService.incrementRepoCount(kbId);
         eventPublisher.publishEvent(new RepoImportedEvent(this, saved.getId()));
-        graphZipUploadService.submit(saved.getId(), zipBytes, fn, repoNameOpt);
+        eventPublisher.publishEvent(new ZipGraphUploadRequestedEvent(this, saved.getId(), zipBytes, fn, repoNameOpt));
         return saved;
     }
 
